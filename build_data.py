@@ -301,6 +301,43 @@ def main():
             if not isinstance(c.get(k), str):
                 sys.exit(f"bad {k}={c.get(k)!r} in {c['i']}; not publishing")
 
+    # EUR -> USD so Cardmarket-only cards can be valued in dollars.
+    eur_usd = 1.08
+    try:
+        rate = json.loads(http("https://api.frankfurter.app/latest?from=EUR&to=USD", tries=3))
+        eur_usd = float(rate["rates"]["USD"])
+    except Exception as e:
+        log("exchange rate unavailable, using default:", e)
+
+    # Price history: highest market price recorded for each card and printing, kept from day to day.
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    hist = {}
+    hpath = os.path.join(CACHE, "history.json.gz")
+    if os.path.exists(hpath):
+        try:
+            with gzip.open(hpath, "rt", encoding="utf-8") as f:
+                hist = json.load(f)
+        except Exception as e:
+            log("history unreadable, starting fresh:", e)
+    for c in cards:
+        key = c["l"] + ":" + c["i"]
+        h = hist.setdefault(key, {})
+        prices = {k: v[0] for k, v in (c.get("tp") or {}).items() if v and v[0]}
+        cm = c.get("cm")
+        if cm and cm[3]:
+            prices["cm"] = round(cm[3] * eur_usd, 2)       # Cardmarket trend, in USD
+        if cm and len(cm) > 7 and cm[7]:
+            prices["cm-foil"] = round(cm[7] * eur_usd, 2)
+        for k, p in prices.items():
+            if k not in h or p > h[k][0]:
+                h[k] = [p, today]
+        if h:
+            c["hi"] = h
+        else:
+            hist.pop(key, None)
+    with gzip.open(os.path.join(OUT, "history.json.gz"), "wt", encoding="utf-8") as f:
+        json.dump(hist, f, separators=(",", ":"))
+
     version = int(time.time())
     with gzip.open(os.path.join(OUT, "catalog.json.gz"), "wt", encoding="utf-8", compresslevel=9) as f:
         json.dump({"version": version, "cards": cards}, f, ensure_ascii=False, separators=(",", ":"))
@@ -312,7 +349,7 @@ def main():
     manifest = {
         "version": version,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "counts": counts, "fingerprints": n_emb, "files": files,
+        "counts": counts, "fingerprints": n_emb, "files": files, "eur_usd": eur_usd,
     }
     with open(os.path.join(OUT, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)

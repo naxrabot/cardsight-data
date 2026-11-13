@@ -33,6 +33,8 @@ jobs:
           mkdir -p cache
           curl -fsSL -o cache/embcache.npz \
             "https://github.com/${{ github.repository }}/releases/download/latest/embcache.npz" || echo "no previous cache"
+          curl -fsSL -o cache/history.json.gz \
+            "https://github.com/${{ github.repository }}/releases/download/latest/history.json.gz" || echo "no previous history"
       - name: Build data
         run: python build_data.py
       - name: Publish to the "latest" release
@@ -42,5 +44,5 @@ jobs:
           gh release view latest >/dev/null 2>&1 || \
             gh release create latest --title "CardSight data" \
               --notes "Daily card catalog, prices and picture fingerprints for the CardSight app. Rebuilt automatically."
-          gh release upload latest out/catalog.json.gz out/emb.bin out/embedder.tflite out/embcache.npz --clobber
+          gh release upload latest out/catalog.json.gz out/emb.bin out/embedder.tflite out/embcache.npz out/history.json.gz --clobber
           gh release upload latest out/manifest.json --clobber
