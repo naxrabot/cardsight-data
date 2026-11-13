@@ -74,9 +74,9 @@ def compact_card(lang, c):
     rec = {
         "i": c["id"], "l": lang, "n": c.get("name") or "", "no": c.get("localId") or "",
         "s": s.get("id") or "", "sn": s.get("name") or "",
-        "so": cc.get("official") or 0, "st": cc.get("total") or 0,
+        "so": int(cc.get("official") or 0), "st": int(cc.get("total") or 0),
         "r": "" if c.get("rarity") in (None, "None") else c["rarity"],
-        "v": flags, "d": dex[0] if dex else 0, "img": c.get("image"),
+        "v": flags, "d": int(dex[0]) if dex and isinstance(dex[0], (int, float)) else 0, "img": c.get("image"),
     }
     pr = c.get("pricing") or {}
     tp = pr.get("tcgplayer") or {}
@@ -276,6 +276,15 @@ def main():
         with open(model_path, "wb") as f:
             f.write(http(MODEL_URL))
     n_emb = build_fingerprints(cards, model_path)
+
+    # The phone expects exact types; refuse to publish anything else.
+    for c in cards:
+        for k in ("so", "st", "d", "e"):
+            if not isinstance(c.get(k), int):
+                sys.exit(f"bad {k}={c.get(k)!r} in {c['i']} ({c['l']}); not publishing")
+        for k in ("i", "l", "n", "no", "s", "sn", "r", "v"):
+            if not isinstance(c.get(k), str):
+                sys.exit(f"bad {k}={c.get(k)!r} in {c['i']}; not publishing")
 
     version = int(time.time())
     with gzip.open(os.path.join(OUT, "catalog.json.gz"), "wt", encoding="utf-8", compresslevel=9) as f:
