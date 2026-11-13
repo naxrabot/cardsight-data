@@ -15,9 +15,12 @@ gallery = random.sample(urls, 3000)
 queries = gallery[:200]
 
 def fetch(u):
-    return u, http(u + "/high.png", tries=3, timeout=30)
+    try:
+        return u, http(u + "/high.png", tries=3, timeout=30)
+    except Exception:
+        return u, None
 imgs = {}
-with cf.ThreadPoolExecutor(32) as ex:
+with cf.ThreadPoolExecutor(12) as ex:
     for u, b in ex.map(fetch, gallery):
         if b: imgs[u] = Image.open(io.BytesIO(b)).convert("RGB").resize((367, 512), Image.BILINEAR)
 gallery = [u for u in gallery if u in imgs]; queries = [u for u in queries if u in imgs]
