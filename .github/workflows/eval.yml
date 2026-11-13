@@ -1,10 +1,12 @@
 name: Picture-match accuracy test
 on:
   workflow_dispatch:
-  push:
-    paths: ["tools/eval_pictures.py", ".github/workflows/eval.yml"]
+  workflow_run:
+    workflows: ["Build CardSight data"]
+    types: [completed]
 jobs:
   eval:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

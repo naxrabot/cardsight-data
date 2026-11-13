@@ -32,6 +32,7 @@ ASIAN = ["ja", "zh-tw", "zh-cn"]
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/image_embedder/"
              "mobilenet_v3_large/float32/latest/mobilenet_v3_large.tflite")
 PCA_DIMS = 128
+FP_FORMAT = "full+art/2"  # bump when fingerprints are made differently, to rebuild the cache
 OUT = "out"
 CACHE = "cache"
 UA = {"User-Agent": "CardSight-data/1.0 (+https://github.com/naxrabot/cardsight-data)"}
@@ -155,6 +156,23 @@ def degrade(pil):
     return Image.open(io.BytesIO(buf.getvalue()))
 
 
+def art_box(pil):
+    """The artwork window of a card (same proportions the phone uses)."""
+    w, h = pil.size
+    return pil.crop((int(w * .07), int(h * .10), int(w * .93), int(h * .53)))
+
+
+def pca_int8(X):
+    mean = X.mean(axis=0)
+    _, _, vt = np.linalg.svd(X - mean, full_matrices=False)
+    comps = vt[:PCA_DIMS].T.astype(np.float32)          # D x K
+    P = (X - mean) @ comps
+    P /= np.linalg.norm(P, axis=1, keepdims=True) + 1e-9
+    scale = 127.0 / float(np.percentile(np.abs(P), 99.9))
+    Q = np.clip(np.round(P * scale), -127, 127).astype(np.int8)
+    return mean.astype("<f4"), comps.astype("<f4"), scale, Q
+
+
 def build_fingerprints(cards, model_path):
     from PIL import Image
     # Asian printings often lack an image in one language but share the exact art (same id) in another.
@@ -174,10 +192,10 @@ def build_fingerprints(cards, model_path):
     if os.path.exists(cpath):
         try:
             z = np.load(cpath, allow_pickle=False)
-            if str(z["model"]) != msha:
-                raise ValueError("image model changed")
-            for u, v in zip(z["urls"], z["vecs"]):
-                cache[str(u)] = v.astype(np.float32)
+            if str(z["model"]) != msha + FP_FORMAT:
+                raise ValueError("image model or fingerprint format changed")
+            for u, v, a in zip(z["urls"], z["vecs"], z["arts"]):
+                cache[str(u)] = (v.astype(np.float32), a.astype(np.float32))
             log(f"fingerprint cache: {len(cache)} reused")
         except Exception as e:
             log("cache unreadable, rebuilding:", e)
@@ -195,35 +213,38 @@ def build_fingerprints(cards, model_path):
             if b:
                 try:
                     pil = Image.open(io.BytesIO(b)).convert("RGB")
+                    art = art_box(pil)
+                    # clean + "livestream-quality" views averaged: much more robust to blur/glare
                     v = embed(pil) + embed(degrade(pil))
-                    cache[u] = (v / (np.linalg.norm(v) + 1e-9)).astype(np.float32)
+                    a = embed(art) + embed(degrade(art))
+                    cache[u] = ((v / (np.linalg.norm(v) + 1e-9)).astype(np.float32),
+                                (a / (np.linalg.norm(a) + 1e-9)).astype(np.float32))
                 except Exception as e:
                     log("embed failed", u, e)
             if n % 2000 == 0:
                 log(f"fingerprints {n}/{len(todo)}")
 
     good = [u for u in urls if u in cache]
-    np.savez_compressed(os.path.join(OUT, "embcache.npz"),
-                        model=np.array(msha), urls=np.array(good), vecs=np.stack([cache[u] for u in good]).astype(np.float16))
+    np.savez_compressed(os.path.join(OUT, "embcache.npz"), model=np.array(msha + FP_FORMAT),
+                        urls=np.array(good),
+                        vecs=np.stack([cache[u][0] for u in good]).astype(np.float16),
+                        arts=np.stack([cache[u][1] for u in good]).astype(np.float16))
     row = {u: i for i, u in enumerate(good)}
     for c in cards:
         c["e"] = row.get(c.get("img"), -1)
 
-    X = np.stack([cache[u] for u in good]).astype(np.float32)
-    mean = X.mean(axis=0)
-    _, _, vt = np.linalg.svd(X - mean, full_matrices=False)
-    comps = vt[:PCA_DIMS].T.astype(np.float32)          # D x K
-    P = (X - mean) @ comps
-    P /= np.linalg.norm(P, axis=1, keepdims=True) + 1e-9
-    scale = 127.0 / float(np.percentile(np.abs(P), 99.9))
-    Q = np.clip(np.round(P * scale), -127, 127).astype(np.int8)
-    D, K, N = X.shape[1], PCA_DIMS, len(good)
+    XF = np.stack([cache[u][0] for u in good]).astype(np.float32)
+    XA = np.stack([cache[u][1] for u in good]).astype(np.float32)
+    mF, cF, sF, QF = pca_int8(XF)
+    mA, cA, sA, QA = pca_int8(XA)
+    D, K, N = XF.shape[1], PCA_DIMS, len(good)
     with open(os.path.join(OUT, "emb.bin"), "wb") as f:
-        f.write(b"CSE1")
-        f.write(struct.pack("<iiif", D, K, N, scale))
-        f.write(mean.astype("<f4").tobytes())
-        f.write(comps.astype("<f4").tobytes())
-        f.write(Q.tobytes())
+        f.write(b"CSE2")
+        f.write(struct.pack("<iiiff", D, K, N, sF, sA))
+        for arr in (mF, cF, mA, cA):
+            f.write(arr.tobytes())
+        f.write(QF.tobytes())
+        f.write(QA.tobytes())
     log(f"emb.bin: N={N} D={D} K={K}")
     return N
 

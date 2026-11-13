@@ -1,36 +1,34 @@
-"""Compare picture-matching approaches on fake 'livestream' views (gallery = 3000 random cards)."""
-import gzip, io, json, random, sys, urllib.request, concurrent.futures as cf
+"""Accuracy test of the published picture fingerprints (exactly what the phone uses), against the
+full catalog, using fake 'livestream' views of random cards."""
+import gzip, io, json, random, struct, sys, urllib.request, concurrent.futures as cf
 import numpy as np
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 sys.path.insert(0, ".")
-from build_data import make_embedder, http, degrade
+from build_data import make_embedder, http, art_box
 
 BASE = "https://github.com/naxrabot/cardsight-data/releases/download/latest/"
-open("m.tflite", "wb").write(urllib.request.urlopen(BASE + "embedder.tflite").read())
-cat = json.loads(gzip.decompress(urllib.request.urlopen(BASE + "catalog.json.gz").read()))["cards"]
+def dl(n): return urllib.request.urlopen(BASE + n).read()
+open("m.tflite", "wb").write(dl("embedder.tflite"))
+cat = json.loads(gzip.decompress(dl("catalog.json.gz")))["cards"]
+b = dl("emb.bin"); assert b[:4] == b"CSE2"; off = 4
+D, K, N, sF, sA = struct.unpack_from("<iiiff", b, off); off += 20
+def arr(n, dt="<f4", size=4):
+    global off
+    a = np.frombuffer(b, dt, n, off); off += n * size; return a
+mF = arr(D); cF = arr(D * K).reshape(D, K); mA = arr(D); cA = arr(D * K).reshape(D, K)
+QF = arr(N * K, np.int8, 1).reshape(N, K).astype(np.float32)
+QA = arr(N * K, np.int8, 1).reshape(N, K).astype(np.float32)
 embed = make_embedder("m.tflite")
-urls = sorted({c["img"] for c in cat if c.get("img") and c["l"] == "en"})
-random.seed(7)
-gallery = random.sample(urls, 3000)
-queries = gallery[:200]
+rows = {}
+for c in cat:
+    if c.get("e", -1) >= 0: rows.setdefault(c["e"], c)
+random.seed(11)
+sample = random.sample(list(rows.items()), 300)
 
-def fetch(u):
-    try:
-        return u, http(u + "/high.png", tries=3, timeout=30)
-    except Exception:
-        return u, None
-imgs = {}
-with cf.ThreadPoolExecutor(12) as ex:
-    for u, b in ex.map(fetch, gallery):
-        if b: imgs[u] = Image.open(io.BytesIO(b)).convert("RGB").resize((367, 512), Image.BILINEAR)
-gallery = [u for u in gallery if u in imgs]; queries = [u for u in queries if u in imgs]
-print("gallery", len(gallery), "queries", len(queries), flush=True)
-
-def art(im):  # artwork box of a modern card layout
-    w, h = im.size
-    return im.crop((int(w * .07), int(h * .10), int(w * .93), int(h * .53)))
-
-def norm(v): return v / (np.linalg.norm(v) + 1e-9)
+def fetch(item):
+    row, c = item
+    try: return row, c, http(c["img"] + "/high.png", tries=3, timeout=30)
+    except Exception: return row, c, None
 
 def stream_view(card, card_px):
     w, h = card.size
@@ -51,26 +49,25 @@ def stream_view(card, card_px):
     buf = io.BytesIO(); small.save(buf, "JPEG", quality=40)
     out = Image.open(io.BytesIO(buf.getvalue())).convert("RGB")
     cw, ch = out.width / 1.5, out.height / 1.35
-    m = random.uniform(0.0, 0.08)
+    m = random.uniform(0.0, 0.05)
     l, t = (out.width - cw) / 2 - cw * m, (out.height - ch) / 2 - ch * m
     return out.crop((int(l), int(t), int(l + cw * (1 + 2 * m)), int(t + ch * (1 + 2 * m))))
 
-# reference fingerprints
-G_full = np.stack([norm(embed(imgs[u]) + embed(degrade(imgs[u]))) for u in gallery])
-G_full1 = np.stack([norm(embed(imgs[u])) for u in gallery])
-G_art = np.stack([norm(embed(art(imgs[u])) + embed(degrade(art(imgs[u])))) for u in gallery])
-print("refs done", flush=True)
-idx = {u: i for i, u in enumerate(gallery)}
+def proj(v, m, c):
+    q = (v - m) @ c; return q / (np.linalg.norm(q) + 1e-9)
 
+with cf.ThreadPoolExecutor(12) as ex:
+    data = [(r, c, Image.open(io.BytesIO(x)).convert("RGB").resize((367, 512))) for r, c, x in ex.map(fetch, sample) if x]
+print(f"gallery: all {N} catalog pictures; queries: {len(data)}", flush=True)
 for px in (300, 200):
-    res = {k: [0, 0] for k in ("full", "full_noaug", "art", "full+art")}
-    for u in queries:
-        q = stream_view(imgs[u], px)
-        # the app's card finder trims most background; emulate a tight-ish crop
-        qf = norm(embed(q)); qa = norm(embed(art(q)))
-        for name, sims in (("full", G_full @ qf), ("full_noaug", G_full1 @ qf), ("art", G_art @ qa),
-                           ("full+art", G_full @ qf + G_art @ qa)):
-            o = np.argsort(-sims)[:5]
-            res[name][0] += int(o[0] == idx[u]); res[name][1] += int(idx[u] in o)
-    n = len(queries)
-    print(f"card {px}px wide: " + "  ".join(f"{k}: top1 {100*a/n:.0f}% top5 {100*b/n:.0f}%" for k, (a, b) in res.items()), flush=True)
+    t1 = t5 = 0
+    by_lang = {}
+    for row, c, im in data:
+        q = stream_view(im, px)
+        sims = (QF @ proj(embed(q), mF, cF) / sF + QA @ proj(embed(art_box(q)), mA, cA) / sA) / 2
+        o = np.argsort(-sims)[:5]
+        ok1 = int(o[0] == row); t1 += ok1; t5 += int(row in o)
+        l = by_lang.setdefault(c["l"], [0, 0]); l[0] += ok1; l[1] += 1
+    n = len(data)
+    langs = ", ".join(f"{k} {100*a/b:.0f}% of {b}" for k, (a, b) in by_lang.items())
+    print(f"card {px}px wide: exact top-1 {100*t1/n:.0f}%, in top-5 {100*t5/n:.0f}%  ({langs})", flush=True)
