@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import struct
 import sys
 import time
@@ -125,6 +126,81 @@ def fetch_lang(lang):
             if n % 3000 == 0:
                 log(f"[{lang}] {n}/{len(brief)}")
     log(f"[{lang}] done, {failed} without details")
+    return out
+
+
+# ---------------------------------------------------------------- sealed products (packs, boxes, ETBs, cases...)
+
+TCGCSV = "https://tcgcsv.com/tcgplayer"
+SEALED_CATEGORIES = [(3, "en"), (85, "ja")]  # TCGplayer: Pokemon, Pokemon Japan
+
+
+def sealed_kind(name):
+    n = name.lower()
+    if "case" in n:
+        return "Case"
+    if "booster box" in n or "booster display" in n or "display box" in n:
+        return "Booster Box"
+    if "elite trainer box" in n or re.search(r"\betb\b", n):
+        return "Elite Trainer Box"
+    if "booster bundle" in n:
+        return "Booster Bundle"
+    if "blister" in n:
+        return "Blister"
+    if "build & battle" in n or "build and battle" in n:
+        return "Build & Battle"
+    if re.search(r"\btin\b", n):
+        return "Tin"
+    if "booster pack" in n or "sleeved booster" in n or re.search(r"\bpack\b", n):
+        return "Booster Pack"
+    if "deck" in n:
+        return "Deck"
+    if "collection" in n or "premium" in n or re.search(r"\bbox\b", n):
+        return "Collection Box"
+    return "Sealed"
+
+
+def fetch_sealed():
+    """Every sealed product TCGplayer lists for Pokemon (English + Japanese), with prices (USD)."""
+    out = []
+    for cat, lang in SEALED_CATEGORIES:
+        groups = json.loads(http(f"{TCGCSV}/{cat}/groups"))["results"]
+
+        def one(g):
+            gid = g["groupId"]
+            try:
+                prods = json.loads(http(f"{TCGCSV}/{cat}/{gid}/products", tries=4) or b'{"results":[]}')["results"]
+                prices = json.loads(http(f"{TCGCSV}/{cat}/{gid}/prices", tries=4) or b'{"results":[]}')["results"]
+            except Exception:
+                return []
+            pmap = {}
+            for p in prices:
+                pmap.setdefault(p["productId"], []).append(p)
+            items = []
+            for p in prods:
+                ext = {e.get("name") for e in (p.get("extendedData") or [])}
+                if "Number" in ext:          # single cards have a card number
+                    continue
+                name = p.get("name") or ""
+                if "code card" in name.lower():
+                    continue
+                pr = pmap.get(p["productId"], [])
+                best = max(pr, key=lambda x: x.get("marketPrice") or 0, default=None)
+                if not best or not (best.get("marketPrice") or best.get("lowPrice")):
+                    continue                  # no price data at all
+                items.append({
+                    "i": str(p["productId"]), "l": lang, "n": name, "s": g.get("name") or "",
+                    "k": sealed_kind(name), "img": p.get("imageUrl"), "u": p.get("url"),
+                    "m": num(best.get("marketPrice")), "lo": num(best.get("lowPrice")),
+                    "mid": num(best.get("midPrice")), "hi": num(best.get("highPrice")),
+                    "d": (g.get("publishedOn") or "")[:10],
+                })
+            return items
+
+        with cf.ThreadPoolExecutor(8) as ex:
+            for items in ex.map(one, groups):
+                out.extend(items)
+        log(f"sealed [{lang}]: {sum(1 for x in out if x['l'] == lang)} products from {len(groups)} sets")
     return out
 
 
@@ -335,21 +411,37 @@ def main():
             c["hi"] = h
         else:
             hist.pop(key, None)
+
+    # Sealed products, with the same "highest recorded" history as cards.
+    sealed = []
+    try:
+        sealed = fetch_sealed()
+    except Exception as e:
+        log("sealed products skipped:", e)
+    for p in sealed:
+        h = hist.setdefault("sealed:" + p["i"], {})
+        if p.get("m"):
+            if "m" not in h or p["m"] > h["m"][0]:
+                h["m"] = [p["m"], today]
+            p["hx"] = h["m"]
     with gzip.open(os.path.join(OUT, "history.json.gz"), "wt", encoding="utf-8") as f:
         json.dump(hist, f, separators=(",", ":"))
+    with gzip.open(os.path.join(OUT, "sealed.json.gz"), "wt", encoding="utf-8", compresslevel=9) as f:
+        json.dump({"products": sealed}, f, ensure_ascii=False, separators=(",", ":"))
 
     version = int(time.time())
     with gzip.open(os.path.join(OUT, "catalog.json.gz"), "wt", encoding="utf-8", compresslevel=9) as f:
         json.dump({"version": version, "cards": cards}, f, ensure_ascii=False, separators=(",", ":"))
 
     files = {}
-    for name in ("catalog.json.gz", "emb.bin", "embedder.tflite"):
+    for name in ("catalog.json.gz", "emb.bin", "embedder.tflite", "sealed.json.gz"):
         p = os.path.join(OUT, name)
         files[name] = {"sha256": sha(p), "size": os.path.getsize(p)}
     manifest = {
         "version": version,
         "generated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "counts": counts, "fingerprints": n_emb, "files": files, "eur_usd": eur_usd,
+        "sealed": len(sealed),
     }
     with open(os.path.join(OUT, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=1)
