@@ -205,10 +205,12 @@ def build_fingerprints(cards, model_path):
     embed = make_embedder(model_path)
 
     def fetch(u):
-        b = http(u + "/low.png", tries=5, timeout=30)
-        return u, b
+        try:
+            return u, http(u + "/low.png", tries=6, timeout=30)
+        except Exception:
+            return u, None  # skip this picture today; text matching still covers the card
 
-    with cf.ThreadPoolExecutor(24) as ex:
+    with cf.ThreadPoolExecutor(12) as ex:
         for n, (u, b) in enumerate(ex.map(fetch, todo), 1):
             if b:
                 try:
