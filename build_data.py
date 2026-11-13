@@ -271,6 +271,21 @@ def main():
     if counts.get("en", 0) < 15000:
         sys.exit(f"English catalog too small ({counts}); not publishing")
 
+    # English names for Japanese/Chinese cards (shown in the app, and matched against English listing titles).
+    try:
+        from en_names import Namer
+        namer = Namer()
+        named = 0
+        for c in cards:
+            if c["l"] != "en":
+                e = namer.english(c["n"], c["d"])
+                if e:
+                    c["en"] = e
+                    named += 1
+        log(f"English names: {named}/{sum(1 for c in cards if c['l'] != 'en')} Japanese/Chinese cards")
+    except Exception as e:
+        log("English names skipped:", e)
+
     model_path = os.path.join(OUT, "embedder.tflite")
     if not os.path.exists(model_path):
         with open(model_path, "wb") as f:
