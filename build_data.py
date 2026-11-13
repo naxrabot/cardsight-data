@@ -137,8 +137,8 @@ SEALED_CATEGORIES = [(3, "en"), (85, "ja")]  # TCGplayer: Pokemon, Pokemon Japan
 
 def sealed_kind(name):
     n = name.lower()
-    if "case" in n:
-        return "Case"
+    if "case" in n or "display" in n and "booster box" not in n and "booster display" not in n:
+        return "Case" if "case" in n else "Display"
     if "booster box" in n or "booster display" in n or "display box" in n:
         return "Booster Box"
     if "elite trainer box" in n or re.search(r"\betb\b", n):
@@ -179,7 +179,8 @@ def fetch_sealed():
             items = []
             for p in prods:
                 ext = {e.get("name") for e in (p.get("extendedData") or [])}
-                if "Number" in ext:          # single cards have a card number
+                # Single cards carry card details (number, rarity, HP, attacks…); sealed products don't.
+                if ext & {"Number", "Rarity", "Card Type", "CardType", "HP", "Stage", "Attack 1", "Weakness", "RetreatCost"}:
                     continue
                 name = p.get("name") or ""
                 if "code card" in name.lower():
