@@ -31,7 +31,7 @@ LANGS = ["en", "ja", "zh-tw", "zh-cn"]
 ASIAN = ["ja", "zh-tw", "zh-cn"]
 MODEL_URL = ("https://storage.googleapis.com/mediapipe-models/image_embedder/"
              "mobilenet_v3_large/float32/latest/mobilenet_v3_large.tflite")
-PCA_DIMS = 128
+PCA_DIMS = 256
 FP_FORMAT = "full+art/2"  # bump when fingerprints are made differently, to rebuild the cache
 OUT = "out"
 CACHE = "cache"
