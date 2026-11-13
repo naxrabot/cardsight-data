@@ -1,0 +1,46 @@
+name: Build CardSight data
+
+on:
+  schedule:
+    - cron: "23 23 * * *"   # daily, after TCGdex refreshes prices (~22:15 UTC)
+  workflow_dispatch:
+  push:
+    paths: ["build_data.py", ".github/workflows/build-data.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libegl1 libgles2 libgl1 > /dev/null
+          pip install -q mediapipe numpy pillow
+      - name: Reuse previous fingerprints
+        run: |
+          mkdir -p cache
+          curl -fsSL -o cache/embcache.npz \
+            "https://github.com/${{ github.repository }}/releases/download/latest/embcache.npz" || echo "no previous cache"
+      - name: Build data
+        run: python build_data.py
+      - name: Publish to the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || \
+            gh release create latest --title "CardSight data" \
+              --notes "Daily card catalog, prices and picture fingerprints for the CardSight app. Rebuilt automatically."
+          gh release upload latest out/catalog.json.gz out/emb.bin out/embedder.tflite out/embcache.npz --clobber
+          gh release upload latest out/manifest.json --clobber
