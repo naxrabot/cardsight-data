@@ -2,7 +2,7 @@ name: Train picture model
 on:
   workflow_dispatch:
   push:
-    paths: ["train/**", ".github/workflows/train.yml"]
+    paths: ["train/RUN"]   # change this file to start a training run
 permissions:
   contents: write
 jobs:

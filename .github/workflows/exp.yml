@@ -2,7 +2,7 @@ name: Picture model experiment
 on:
   workflow_dispatch:
   push:
-    paths: ["exp/**", ".github/workflows/exp.yml"]
+    paths: ["exp/dino_exp.py"]
 permissions:
   contents: write
 jobs:
