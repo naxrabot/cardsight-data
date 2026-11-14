@@ -1,0 +1,27 @@
+{
+ "char_straight.png": [
+  "base1-4@en"
+ ],
+ "char_tight.png": [
+  "base1-4@en"
+ ],
+ "char_box.png": [
+  "base1-4@en"
+ ],
+ "psy_straight.png": [
+  "SV9a-071@ja",
+  "SV9a-071@zh-tw",
+  "sv10-193@en"
+ ],
+ "psy_loose.png": [
+  "SV9a-071@ja",
+  "SV9a-071@zh-tw",
+  "sv10-193@en"
+ ],
+ "gold_visible.png": [
+  "me05-087@en"
+ ],
+ "gold_part.png": [
+  "me05-087@en"
+ ]
+}

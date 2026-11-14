@@ -1,0 +1,44 @@
+name: Train picture model
+on:
+  workflow_dispatch:
+  push:
+    paths: ["train/**", ".github/workflows/train.yml"]
+permissions:
+  contents: write
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { tag: m4, backbone: "mobilenetv4_conv_medium.e500_r256_in1k" }
+          - { tag: m3, backbone: "mobilenetv3_large_100.ra_in1k" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: |
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q timm numpy opencv-python-headless onnx onnxruntime
+      - uses: actions/cache@v4
+        with:
+          path: imgcache
+          key: cardimgs-v1-${{ github.run_id }}-${{ matrix.tag }}
+          restore-keys: cardimgs-v1-
+      - run: |
+          mkdir -p cache
+          curl -fsSL -o cache/embcache.npz "https://github.com/${{ github.repository }}/releases/download/latest/embcache.npz"
+          curl -fsSL -o cache/catalog.json.gz "https://github.com/${{ github.repository }}/releases/download/latest/catalog.json.gz"
+      - env:
+          BACKBONE: ${{ matrix.backbone }}
+          BUDGET_MIN: "265"
+        run: python train/train.py
+      - if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out && for f in *; do mv "$f" "${{ matrix.tag }}_$f"; done && cd ..
+          gh release view exp >/dev/null 2>&1 || gh release create exp --prerelease --title "Experiments" --notes "Scratch files for picture-matching experiments. Not used by the app."
+          gh release upload exp out/* --clobber
