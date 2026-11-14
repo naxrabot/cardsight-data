@@ -19,6 +19,7 @@ import io
 import json
 import os
 import re
+import shutil
 import struct
 import sys
 import time
@@ -325,7 +326,96 @@ def build_fingerprints(cards, model_path):
         f.write(QF.tobytes())
         f.write(QA.tobytes())
     log(f"emb.bin: N={N} D={D} K={K}")
-    return N
+    return N, good
+
+
+NET_W, NET_H = 192, 256
+
+
+def net_views(png_bytes):
+    """A catalog picture as the trained model saw it in training: clean, plus a small soft copy."""
+    import cv2
+    c = cv2.cvtColor(cv2.imdecode(np.frombuffer(png_bytes, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    c = cv2.resize(c, (245, 337), interpolation=cv2.INTER_AREA)
+    a = cv2.resize(c, (NET_W, NET_H), interpolation=cv2.INTER_AREA)
+    b = cv2.resize(cv2.resize(c, (82, 112), interpolation=cv2.INTER_AREA), (NET_W, NET_H), interpolation=cv2.INTER_LINEAR)
+    return np.stack([a, b])
+
+
+def build_net_fingerprints(good, fetch_png=None):
+    """Fingerprints from CardSight's own livestream-trained picture model (emb3.bin + cardnet.onnx).
+    Rows line up with emb.bin / the catalog's "e" numbers. Skipped until a trained model is published."""
+    model = os.path.join(CACHE, "cardnet.onnx")
+    if not os.path.exists(model):
+        log("trained picture model: none published yet")
+        return False
+    import onnxruntime as ort
+    msha = sha(model)
+    cache = {}
+    for name, need_sha in (("netcache.npz", True), ("gallery_seed.npz", False)):
+        cpath = os.path.join(CACHE, name)
+        if cache or not os.path.exists(cpath):
+            continue
+        try:
+            z = np.load(cpath, allow_pickle=False)
+            if need_sha and str(z["model"]) != msha:
+                raise ValueError("picture model changed")
+            for u, v in zip(z["urls"], z["vecs"]):
+                cache[str(u)] = v.astype(np.float32)
+            log(f"trained fingerprints: {len(cache)} reused from {name}")
+        except Exception as e:
+            log(name, "not used:", e)
+    todo = [u for u in good if u not in cache]
+    log(f"trained fingerprints: {len(good)} pictures, {len(todo)} new")
+    if todo:
+        sess = ort.InferenceSession(model, providers=["CPUExecutionProvider"])
+        inp = sess.get_inputs()[0].name
+
+        def fetch(u):
+            try:
+                b = fetch_png(u) if fetch_png else http(u + "/low.png", tries=6, timeout=30)
+                return u, net_views(b) if b else None
+            except Exception:
+                return u, None
+
+        def flush(us, vs):
+            if not us:
+                return
+            x = np.concatenate(vs).transpose(0, 3, 1, 2).astype(np.float32)
+            e = sess.run(None, {inp: x})[0].reshape(len(us), 2, -1).sum(1)
+            e /= np.linalg.norm(e, axis=1, keepdims=True) + 1e-9
+            for u, v in zip(us, e):
+                cache[u] = v.astype(np.float32)
+
+        with cf.ThreadPoolExecutor(12) as ex:
+            us, vs = [], []
+            for n, (u, v) in enumerate(ex.map(fetch, todo), 1):
+                if v is not None:
+                    us.append(u)
+                    vs.append(v)
+                if len(us) >= 64:
+                    flush(us, vs)
+                    us, vs = [], []
+                if n % 2000 == 0:
+                    log(f"trained fingerprints {n}/{len(todo)}")
+            flush(us, vs)
+    have = [u for u in good if u in cache]
+    if not have:
+        return False
+    K = len(cache[have[0]])
+    np.savez_compressed(os.path.join(OUT, "netcache.npz"), model=np.array(msha), urls=np.array(have),
+                        vecs=np.stack([cache[u] for u in have]).astype(np.float16))
+    zero = np.zeros(K, np.float32)
+    X = np.stack([cache.get(u, zero) for u in good]).astype(np.float32)
+    scale = 127.0 / float(np.percentile(np.abs(X), 99.9))
+    Q = np.clip(np.round(X * scale), -127, 127).astype(np.int8)
+    with open(os.path.join(OUT, "emb3.bin"), "wb") as f:
+        f.write(b"CSE3")
+        f.write(struct.pack("<iif", K, len(good), scale))
+        f.write(Q.tobytes())
+    shutil.copyfile(model, os.path.join(OUT, "cardnet.onnx"))
+    log(f"emb3.bin: N={len(good)} K={K} ({len(good) - len(have)} without a picture)")
+    return True
 
 
 def sha(path):
@@ -367,7 +457,12 @@ def main():
     if not os.path.exists(model_path):
         with open(model_path, "wb") as f:
             f.write(http(MODEL_URL))
-    n_emb = build_fingerprints(cards, model_path)
+    n_emb, good = build_fingerprints(cards, model_path)
+    trained = False
+    try:
+        trained = build_net_fingerprints(good)
+    except Exception as e:
+        log("trained fingerprints skipped:", e)
 
     # The phone expects exact types; refuse to publish anything else.
     for c in cards:
@@ -435,7 +530,10 @@ def main():
         json.dump({"version": version, "cards": cards}, f, ensure_ascii=False, separators=(",", ":"))
 
     files = {}
-    for name in ("catalog.json.gz", "emb.bin", "embedder.tflite", "sealed.json.gz"):
+    names = ["catalog.json.gz", "emb.bin", "embedder.tflite", "sealed.json.gz"]
+    if trained:
+        names += ["emb3.bin", "cardnet.onnx"]
+    for name in names:
         p = os.path.join(OUT, name)
         files[name] = {"sha256": sha(p), "size": os.path.getsize(p)}
     manifest = {

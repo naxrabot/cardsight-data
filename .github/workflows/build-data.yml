@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libegl1 libgles2 libgl1 > /dev/null
-          pip install -q mediapipe numpy pillow
+          pip install -q mediapipe numpy pillow onnxruntime opencv-python-headless
       - name: Reuse previous fingerprints
         run: |
           mkdir -p cache
@@ -35,6 +35,15 @@ jobs:
             "https://github.com/${{ github.repository }}/releases/download/latest/embcache.npz" || echo "no previous cache"
           curl -fsSL -o cache/history.json.gz \
             "https://github.com/${{ github.repository }}/releases/download/latest/history.json.gz" || echo "no previous history"
+      - name: Fetch the trained picture model (if one has been chosen)
+        run: |
+          R="https://github.com/${{ github.repository }}/releases/download"
+          if [ -f picture_model.txt ]; then
+            P="$(tr -d '[:space:]' < picture_model.txt)"
+            curl -fsSL -o cache/cardnet.onnx "$R/exp/${P}_cardnet.onnx"
+            curl -fsSL -o cache/gallery_seed.npz "$R/exp/${P}_gallery.npz" || echo "no seed"
+            curl -fsSL -o cache/netcache.npz "$R/latest/netcache.npz" || echo "no trained-fingerprint cache yet"
+          fi
       - name: Build data
         run: python build_data.py
       - name: Publish to the "latest" release
@@ -45,6 +54,7 @@ jobs:
             gh release create latest --title "CardSight data" \
               --notes "Daily card catalog, prices and picture fingerprints for the CardSight app. Rebuilt automatically."
           gh release upload latest out/catalog.json.gz out/emb.bin out/embedder.tflite out/embcache.npz out/history.json.gz out/sealed.json.gz --clobber
+          if [ -f out/emb3.bin ]; then gh release upload latest out/emb3.bin out/cardnet.onnx out/netcache.npz --clobber; fi
           gh release upload latest out/manifest.json --clobber
       - name: Record build status (keeps the daily schedule active)
         if: github.event_name == 'schedule'
