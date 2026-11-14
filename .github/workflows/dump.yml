@@ -1,0 +1,19 @@
+name: TCGplayer card list (one-off)
+on:
+  workflow_dispatch:
+  push:
+    paths: ["exp/tcgcsv_dump.py", ".github/workflows/dump.yml"]
+permissions:
+  contents: write
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -q numpy pillow
+      - run: python exp/tcgcsv_dump.py
+      - env: { GH_TOKEN: "${{ github.token }}" }
+        run: gh release upload exp out/tcgcsv_dump.json.gz --clobber
