@@ -1,0 +1,31 @@
+{
+ "version": 1794627177,
+ "generated": "2026-11-14T03:33:00Z",
+ "counts": {
+  "en": 23912,
+  "ja": 13156,
+  "zh-tw": 7436,
+  "zh-cn": 877
+ },
+ "fingerprints": 28151,
+ "files": {
+  "catalog.json.gz": {
+   "sha256": "2870a94e5be2b7324de3dfede39ccefb34d663497cc5b9eea0a9b47b72915b3a",
+   "size": 2423370
+  },
+  "emb.bin": {
+   "sha256": "57a958081da927ef4d7157989dacd222ff138193349722ef05416e4a71f20cdc",
+   "size": 17045016
+  },
+  "embedder.tflite": {
+   "sha256": "11af3c560dfeed7737cb4c03c23bf52a8403020784192d4dea0b74862a12828d",
+   "size": 10889458
+  },
+  "sealed.json.gz": {
+   "sha256": "18d7d4f6d460ff30c901c8501f461a7320c190b52fdff0ee1510d4774f05010c",
+   "size": 122921
+  }
+ },
+ "eur_usd": 1.1052,
+ "sealed": 2501
+}
