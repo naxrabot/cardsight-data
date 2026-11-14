@@ -68,13 +68,14 @@ def apply(cards, groups, lang, today):
         if p.get("u"): c["u"] = p["u"]
         if not c.get("img") and p.get("img"):
             c["img"] = p["img"]; pics += 1
-        if not c.get("tp"):
-            tp = {}
-            for x in g["prices"]:
-                if x["id"] != p["id"]: continue
-                k = SUB.get(x.get("t") or "")
-                if k and (x.get("m") is not None or x.get("lo") is not None):
-                    tp[k] = [x.get("m"), x.get("lo")]
-            if tp:
-                c["tp"] = tp; c["pu"] = today; prices += 1
+        # Prices straight from TCGplayer's list for today: [recent-sales average, cheapest listing, typical listing].
+        # These replace the main source's copy (same numbers, but that copy can be days old and has no typical listing).
+        tp = {}
+        for x in g["prices"]:
+            if x["id"] != p["id"]: continue
+            k = SUB.get(x.get("t") or "")
+            if k and (x.get("m") is not None or x.get("lo") is not None or x.get("mid") is not None):
+                tp[k] = [x.get("m"), x.get("lo"), x.get("mid")]
+        if tp:
+            c["tp"] = tp; c["pu"] = today; prices += 1
     return pics, prices, stats

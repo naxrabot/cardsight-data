@@ -133,7 +133,8 @@ def fetch_singles():
                 if "Number" not in ext and "Rarity" not in ext and "HP" not in ext:
                     continue
                 ps.append({"id": p["productId"], "n": p.get("name"), "img": p.get("imageUrl"), "u": p.get("url"), "no": ext.get("Number")})
-            pr = [{"id": x["productId"], "t": x.get("subTypeName"), "m": num(x.get("marketPrice")), "lo": num(x.get("lowPrice"))} for x in prices]
+            pr = [{"id": x["productId"], "t": x.get("subTypeName"), "m": num(x.get("marketPrice")), "lo": num(x.get("lowPrice")),
+                   "mid": num(x.get("midPrice"))} for x in prices]
             return {"id": gid, "name": g.get("name"), "products": ps, "prices": pr}
 
         with cf.ThreadPoolExecutor(8) as ex:
@@ -492,7 +493,7 @@ def main():
                 log(f"TCGplayer singles [{lang}]: too few, skipped")
                 continue
             pics, prices, stats = tcg_singles.apply(cards, singles[lang], lang, today)
-            log(f"TCGplayer [{lang}]: +{pics} pictures, +{prices} cards priced; "
+            log(f"TCGplayer [{lang}]: +{pics} pictures, {prices} cards priced from today's TCGplayer list; "
                 f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found")
     except Exception as e:
         log("TCGplayer singles skipped:", e)
