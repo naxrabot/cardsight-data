@@ -20,21 +20,35 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
       - run: |
-          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -q timm numpy opencv-python-headless onnx onnxruntime
-      - uses: actions/cache@v4
+          python -c "import torch, torchvision, timm; print(torch.__version__, torchvision.__version__, timm.__version__)"
+      - uses: actions/cache/restore@v4
         with:
           path: imgcache
-          key: cardimgs-v1-${{ github.run_id }}-${{ matrix.tag }}
+          key: cardimgs-v1-none
           restore-keys: cardimgs-v1-
       - run: |
           mkdir -p cache
           curl -fsSL -o cache/embcache.npz "https://github.com/${{ github.repository }}/releases/download/latest/embcache.npz"
           curl -fsSL -o cache/catalog.json.gz "https://github.com/${{ github.repository }}/releases/download/latest/catalog.json.gz"
-      - env:
-          BACKBONE: ${{ matrix.backbone }}
-          BUDGET_MIN: "265"
+      - name: Download card pictures
+        env: { FETCH_ONLY: "1" }
         run: python train/train.py
+      - uses: actions/cache/save@v4
+        if: matrix.tag == 'm4'
+        with:
+          path: imgcache
+          key: cardimgs-v1-${{ github.run_id }}
+      - name: Train
+        env:
+          BACKBONE: ${{ matrix.backbone }}
+          BUDGET_MIN: "255"
+          TAG: ${{ matrix.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view exp >/dev/null 2>&1 || gh release create exp --prerelease --title "Experiments" --notes "Scratch files for picture-matching experiments. Not used by the app."
+          python train/train.py
       - if: always()
         env:
           GH_TOKEN: ${{ github.token }}

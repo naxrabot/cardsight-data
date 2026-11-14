@@ -5,6 +5,7 @@ import concurrent.futures as cf, gzip, io, json, math, os, sys, time, urllib.req
 import cv2, numpy as np, torch, torch.nn as nn, torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import aug
+import timm  # imported up front so a broken install fails in seconds, not after the downloads
 
 BACKBONE = os.environ.get("BACKBONE", "mobilenetv4_conv_medium.e500_r256_in1k")
 BUDGET = float(os.environ.get("BUDGET_MIN", "200")) * 60          # training time
@@ -15,7 +16,26 @@ OUT, CACHE = "out", "imgcache"
 os.makedirs(OUT, exist_ok=True); os.makedirs(CACHE, exist_ok=True)
 UA = {"User-Agent": "cardsight-data (github.com/naxrabot/cardsight-data)"}
 T0 = time.time()
-def log(*a): print(f"[{int(time.time() - T0):5d}s]", *a, flush=True)
+LINES = []
+def log(*a):
+    line = f"[{int(time.time() - T0):5d}s] " + " ".join(str(x) for x in a)
+    LINES.append(line); print(line, flush=True)
+
+TAG = os.environ.get("TAG", "x")
+_last_up = [0.0]
+def publish(names, every=0):
+    """Upload progress / checkpoints to the 'exp' release so a long run can be watched and isn't lost."""
+    if not os.environ.get("GH_TOKEN") or time.time() - _last_up[0] < every: return
+    _last_up[0] = time.time()
+    import shutil, subprocess
+    try:
+        open(f"{OUT}/progress.txt", "w").write("\n".join(LINES))
+        paths = []
+        for n in ["progress.txt"] + names:
+            d = f"/tmp/{TAG}_{n}"; shutil.copyfile(f"{OUT}/{n}", d); paths.append(d)
+        subprocess.run(["gh", "release", "upload", "exp", *paths, "--clobber"], timeout=600, check=False, capture_output=True)
+    except Exception as e:
+        print("publish failed:", e, flush=True)
 
 # ---------------------------------------------------------------- pictures
 def load_images(urls):
@@ -75,7 +95,6 @@ class Clean(torch.utils.data.Dataset):
 class Net(nn.Module):
     def __init__(self):
         super().__init__()
-        import timm
         self.body = timm.create_model(BACKBONE, pretrained=PRETRAINED, num_classes=0)
         with torch.no_grad(): feat = self.body.eval()(torch.zeros(1, 3, aug.H, aug.W)).shape[1]
         self.fc = nn.Linear(feat, DIM); self.bn = nn.BatchNorm1d(DIM)
@@ -103,7 +122,9 @@ def main():
     if LIMIT: urls = urls[:LIMIT]
     store = load_images(urls)
     urls = [u for u in urls if u in store]; blobs = [store[u] for u in urls]; N = len(urls)
+    if os.environ.get("FETCH_ONLY"): log("pictures ready:", N); return
     log("pictures:", N, "backbone:", BACKBONE)
+    publish([])
     torch.set_num_threads(max(1, (os.cpu_count() or 4) - 1))
     net = Net().to(memory_format=torch.channels_last)
     cls = nn.Parameter(torch.randn(N, DIM) * 0.01)
@@ -127,8 +148,10 @@ def main():
             if step % 100 == 0:
                 log(f"ep {ep} step {step} loss {run_loss / 100:.3f} acc {run_acc / 100:.3f} lr {k:.3f} {step * BATCH / (time.time() - t_start):.1f} img/s")
                 run_loss = run_acc = 0.0
+                publish([], every=900)
         ep += 1
         torch.save({"net": net.state_dict()}, f"{OUT}/model.pt")
+        publish(["model.pt"], every=2400)
     log("training done:", ep, "epochs", step, "steps")
 
     # ------------------------------------------------------------ test
