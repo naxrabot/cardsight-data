@@ -1,0 +1,25 @@
+name: Picture model experiment
+on:
+  workflow_dispatch:
+  push:
+    paths: ["exp/**", ".github/workflows/exp.yml"]
+permissions:
+  contents: write
+jobs:
+  exp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -q torch --index-url https://download.pytorch.org/whl/cpu && pip install -q numpy pillow onnx onnxscript
+      - run: |
+          mkdir -p cache
+          curl -fsSL -o cache/embcache.npz "https://github.com/${{ github.repository }}/releases/download/latest/embcache.npz"
+      - run: python exp/dino_exp.py dinov2_vits14
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view exp >/dev/null 2>&1 || gh release create exp --prerelease --title "Experiments" --notes "Scratch files for picture-matching experiments. Not used by the app."
+          gh release upload exp out/* --clobber
