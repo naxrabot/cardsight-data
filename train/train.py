@@ -80,7 +80,8 @@ class Views(torch.utils.data.Dataset):
         if len(self.pool) < 48: self.pool.append(card)
         else: self.pool[int(self.rng.integers(0, 48))] = card
         v = aug.stream_view(card, rng, self.pool)
-        return torch.from_numpy(v).permute(2, 0, 1), i
+        c = aug.clean_view(card, rng, jitter=True)
+        return torch.from_numpy(v).permute(2, 0, 1), i, torch.from_numpy(c).permute(2, 0, 1)
 
 class Clean(torch.utils.data.Dataset):
     def __init__(self, blobs): self.blobs = blobs
@@ -127,7 +128,12 @@ def main():
     publish([])
     torch.set_num_threads(max(1, (os.cpu_count() or 4) - 1))
     net = Net().to(memory_format=torch.channels_last)
+    # MODE=bank: each card's target is the model's own fingerprint of its clean catalog picture, kept in a
+    # table and refreshed whenever the card comes up. (MODE=cls: a learned target per card — slow to start.)
+    bank_mode = os.environ.get("MODE", "bank") == "bank"
     cls = nn.Parameter(torch.randn(N, DIM) * 0.01)
+    bank = torch.from_numpy(embed_gallery(net, blobs)) if bank_mode else None
+    if bank_mode: log("starting table of clean fingerprints ready")
     opt = torch.optim.AdamW([{"params": net.body.parameters(), "lr": 4e-4}, {"params": list(net.fc.parameters()) + list(net.bn.parameters()) + [cls], "lr": 2e-3}], weight_decay=1e-4)
     base = [g["lr"] for g in opt.param_groups]
     dl = torch.utils.data.DataLoader(Views(blobs, seed=1), batch_size=BATCH, shuffle=True, num_workers=WORKERS, drop_last=True, persistent_workers=True)
@@ -135,13 +141,15 @@ def main():
     t_start = time.time(); step = 0; ep = 0; run_loss = run_acc = 0.0
     while time.time() - t_start < BUDGET:
         net.train()
-        for x, y in dl:
+        for x, y, xc in dl:
             frac = (time.time() - t_start) / BUDGET
             if frac >= 1: break
             k = min(1.0, (step + 1) / 300) * 0.5 * (1 + math.cos(math.pi * frac))
             for g, b in zip(opt.param_groups, base): g["lr"] = b * max(k, 0.01)
+            if bank_mode:
+                with torch.no_grad(): bank[y] = net(xc.float().contiguous(memory_format=torch.channels_last))
             e = net(x.float().contiguous(memory_format=torch.channels_last))
-            logits = e @ F.normalize(cls, dim=1).t()
+            logits = e @ (bank.t() if bank_mode else F.normalize(cls, dim=1).t())
             loss = F.cross_entropy(S * (logits - M * F.one_hot(y, N)), y)
             opt.zero_grad(set_to_none=True); loss.backward(); opt.step()
             run_loss += loss.item(); run_acc += (logits.argmax(1) == y).float().mean().item(); step += 1
@@ -159,7 +167,7 @@ def main():
     report = {"backbone": BACKBONE, "epochs": ep, "steps": step, "pictures": N}
     vn = min(2000, N); idx = np.random.default_rng(7).choice(N, vn, replace=False)
     vds = Views([blobs[i] for i in idx], seed=99, fixed=True)
-    q = np.concatenate([embed_views(net, x) for x, _ in torch.utils.data.DataLoader(vds, batch_size=128, num_workers=WORKERS)])
+    q = np.concatenate([embed_views(net, x) for x, _, _ in torch.utils.data.DataLoader(vds, batch_size=128, num_workers=WORKERS)])
     sims = q @ G.T; rank = (sims > sims[np.arange(vn), idx][:, None]).sum(1)
     report["sim_top1"] = float((rank == 0).mean()); report["sim_top5"] = float((rank < 5).mean()); report["sim_top20"] = float((rank < 20).mean())
     log("simulated livestream views: top1 %.3f top5 %.3f top20 %.3f" % (report["sim_top1"], report["sim_top5"], report["sim_top20"]))
