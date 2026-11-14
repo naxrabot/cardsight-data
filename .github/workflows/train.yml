@@ -13,8 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { tag: b4, backbone: "mobilenetv4_conv_medium.e500_r256_in1k" }
-          - { tag: b3, backbone: "mobilenetv3_large_100.ra_in1k" }
+          - { tag: f3, backbone: "mobilenetv3_large_100.ra_in1k", init: "https://github.com/naxrabot/cardsight-data/releases/download/exp/m3_model.pt" }
+          - { tag: f3b, backbone: "mobilenetv3_large_100.ra_in1k", init: "" }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,7 +36,7 @@ jobs:
         env: { FETCH_ONLY: "1" }
         run: python train/train.py
       - uses: actions/cache/save@v4
-        if: matrix.tag == 'b4'
+        if: matrix.tag == 'f3'
         with:
           path: imgcache
           key: cardimgs-v1-${{ github.run_id }}
@@ -44,6 +44,7 @@ jobs:
         env:
           BACKBONE: ${{ matrix.backbone }}
           BUDGET_MIN: "255"
+          INIT_URL: ${{ matrix.init }}
           TAG: ${{ matrix.tag }}
           GH_TOKEN: ${{ github.token }}
         run: |

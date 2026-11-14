@@ -37,6 +37,20 @@ def _glare(img, rng):
         out = out * (1 - a) + col * a
     return np.clip(out, 0, 255).astype(np.uint8)
 
+def _sparkle(img, rng):
+    """Confetti / cracked-ice / cosmos foil: lots of small bright coloured flecks."""
+    h, w = img.shape[:2]; out = img.astype(np.float32)
+    n = int(rng.integers(60, 500)); layer = np.zeros((h, w, 3), np.float32)
+    xs = rng.integers(0, w, n); ys = rng.integers(int(h * rng.uniform(0, 0.12)), int(h * rng.uniform(0.5, 1.0)), n)
+    for x, y in zip(xs, ys):
+        hsv = np.uint8([[[int(rng.integers(0, 180)), int(rng.integers(0, 160)), 255]]])
+        col = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)[0, 0].tolist()
+        r = int(rng.integers(1, 5))
+        if rng.random() < 0.5: cv2.circle(layer, (int(x), int(y)), r, col, -1, cv2.LINE_AA)
+        else: cv2.rectangle(layer, (int(x) - r, int(y) - r), (int(x) + r, int(y) + r), col, -1)
+    a = (layer.max(-1, keepdims=True) / 255.0) * rng.uniform(0.35, 0.9)
+    return np.clip(out * (1 - a) + layer * a, 0, 255).astype(np.uint8)
+
 def _marker(img, rng):
     h, w = img.shape[:2]; img = img.copy()
     col = [(200, 20, 30), (20, 20, 20), (30, 40, 180), (230, 230, 230)][int(rng.integers(0, 4))]
@@ -49,6 +63,12 @@ def _marker(img, rng):
     else:                    # a scribble
         pts = np.cumsum(rng.normal(0, w * 0.12, (int(rng.integers(4, 9)), 2)), 0) + [rng.uniform(.2, .8) * w, rng.uniform(.2, .8) * h]
         cv2.polylines(img, [pts.astype(np.int32)], False, col, th, cv2.LINE_AA)
+    if rng.random() < 0.5:   # big looping handwriting across the lower half (prices, initials)
+        x = rng.uniform(0.1, 0.4) * w; y = rng.uniform(0.5, 0.85) * h
+        for _ in range(int(rng.integers(2, 5))):
+            rx, ry = w * rng.uniform(0.04, 0.12), h * rng.uniform(0.05, 0.14)
+            cv2.ellipse(img, (int(x), int(y)), (int(rx), int(ry)), rng.uniform(-30, 30), rng.uniform(0, 90), rng.uniform(200, 360), col, th, cv2.LINE_AA)
+            x += rx * rng.uniform(1.4, 2.4); y += rng.normal(0, h * 0.02)
     return img
 
 def _color(img, rng):
@@ -90,10 +110,21 @@ def _overlays(img, rng):
             side = rng.random()
             c = (int(rng.uniform(0, w)), int(h * rng.uniform(0.8, 1.05))) if side < 0.5 else \
                 (int(w * (rng.uniform(-0.05, 0.12) if side < 0.75 else rng.uniform(0.88, 1.05))), int(rng.uniform(0.2, 1) * h))
-            cv2.ellipse(img, c, (int(w * rng.uniform(0.06, 0.16)), int(h * rng.uniform(0.08, 0.3))), rng.uniform(0, 180), 0, 360, skin, -1, cv2.LINE_AA)
-    if rng.random() < 0.5:                                    # chat scrolling over the picture
+            cv2.ellipse(img, c, (int(w * rng.uniform(0.06, 0.22)), int(h * rng.uniform(0.08, 0.34))), rng.uniform(0, 180), 0, 360, skin, -1, cv2.LINE_AA)
+    if rng.random() < 0.15:                                   # "… won the auction!" banner / giveaway pop-up
+        c = (int(w * rng.uniform(0.35, 0.65)), int(h * rng.uniform(0.15, 0.5))); r = int(w * rng.uniform(0.08, 0.16))
+        cv2.circle(img, c, r, [(250, 225, 40), (20, 20, 20), (255, 255, 255)][int(rng.integers(0, 3))], -1, cv2.LINE_AA)
+        for k, t in enumerate(("user%d" % rng.integers(1, 99), "Won the auction!")):
+            fs = rng.uniform(0.5, 0.8) - 0.15 * k
+            cv2.putText(img, t, (c[0] - int(w * 0.3), c[1] + r + 22 + k * 22), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), 2, cv2.LINE_AA)
+        if rng.random() < 0.5:                                # confetti
+            for _ in range(int(rng.integers(20, 80))):
+                p0 = (int(rng.uniform(0, w)), int(rng.uniform(0, h)))
+                cv2.rectangle(img, p0, (p0[0] + int(rng.integers(2, 7)), p0[1] + int(rng.integers(2, 7))), _rand_color(rng), -1)
+    if rng.random() < 0.55:                                   # chat scrolling over the picture
         y = int(rng.uniform(0.15, 0.8) * h); x = int(rng.uniform(-0.3, 0.3) * w)
-        for _ in range(int(rng.integers(1, 5))):
+        for _ in range(int(rng.integers(1, 6))):
+            if rng.random() < 0.5: cv2.circle(img, (max(6, x - 10), y - 5), int(rng.integers(5, 10)), _rand_color(rng), -1, cv2.LINE_AA)
             s = " ".join(_WORDS[int(i)] for i in rng.integers(0, len(_WORDS), int(rng.integers(1, 6))))
             fs = rng.uniform(0.35, 0.7); col = (255, 255, 255) if rng.random() < 0.8 else (200, 200, 200)
             cv2.putText(img, s, (x + 1, y + 1), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 0, 0), 3, cv2.LINE_AA)
@@ -114,16 +145,17 @@ def stream_view(card, rng, others=()):
     """One simulated livestream view of [card] (RGB uint8)."""
     c = cv2.resize(card, (200, 280), interpolation=cv2.INTER_AREA)
     c = _color(c, rng)
+    if rng.random() < 0.25: c = _sparkle(c, rng)
     if rng.random() < 0.65: c = _glare(c, rng)
-    if rng.random() < 0.3: c = _marker(c, rng)
+    if rng.random() < 0.4: c = _marker(c, rng)
     if rng.random() < 0.5:                                    # sleeve / top-loader / slab edge around the card
         b = int(rng.integers(2, 14)); col = _rand_color(rng) if rng.random() < 0.4 else tuple(int(rng.integers(170, 255)) for _ in range(3))
         c = cv2.copyMakeBorder(c, b + int(rng.integers(0, 16)), b, b, b, cv2.BORDER_CONSTANT, value=col)
     h, w = c.shape[:2]
     bg = _background(rng, others)
     # where the card sits: mostly filling the view, a bit off-centre, tilted and seen at an angle
-    ch = CH * rng.uniform(0.60, 1.06); cw = ch * w / h * rng.uniform(0.85, 1.12)
-    cx, cy = CW / 2 + rng.normal(0, CW * 0.05), CH / 2 + rng.normal(0, CH * 0.05)
+    ch = CH * rng.uniform(0.58, 1.22); cw = ch * w / h * rng.uniform(0.85, 1.12)
+    cx, cy = CW / 2 + rng.normal(0, CW * 0.07), CH / 2 + rng.normal(0, CH * 0.07)
     ang = np.deg2rad(rng.normal(0, 7)); R = np.array([[np.cos(ang), -np.sin(ang)], [np.sin(ang), np.cos(ang)]])
     corners = np.array([[-cw / 2, -ch / 2], [cw / 2, -ch / 2], [cw / 2, ch / 2], [-cw / 2, ch / 2]]) + rng.normal(0, 0.035, (4, 2)) * [cw, ch]
     dst = (corners @ R.T + [cx, cy]).astype(np.float32)

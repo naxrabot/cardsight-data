@@ -122,19 +122,31 @@ def main():
     urls = [str(u) for u in np.load("cache/embcache.npz", allow_pickle=False)["urls"]]
     if LIMIT: urls = urls[:LIMIT]
     store = load_images(urls)
-    urls = [u for u in urls if u in store]; blobs = [store[u] for u in urls]; N = len(urls)
-    if os.environ.get("FETCH_ONLY"): log("pictures ready:", N); return
+    urls = [u for u in urls if u in store]; all_blobs = [store[u] for u in urls]
+    if os.environ.get("FETCH_ONLY"): log("pictures ready:", len(urls)); return
+    # A few hundred cards are kept out of training to measure how well cards the model has never
+    # studied (new releases) are recognised.
+    hold = set(np.random.default_rng(3).choice(len(urls), min(int(os.environ.get("HOLDOUT", "500")), len(urls) // 8), replace=False).tolist())
+    train_ix = [i for i in range(len(urls)) if i not in hold]
+    blobs = [all_blobs[i] for i in train_ix]; N = len(blobs)
     log("pictures:", N, "backbone:", BACKBONE)
     publish([])
     torch.set_num_threads(max(1, (os.cpu_count() or 4) - 1))
     net = Net().to(memory_format=torch.channels_last)
+    init = os.environ.get("INIT_URL")
+    if init:
+        urllib.request.urlretrieve(init, "/tmp/init.pt")
+        net.load_state_dict(torch.load("/tmp/init.pt", map_location="cpu")["net"]); log("continuing from", init)
     # MODE=bank: each card's target is the model's own fingerprint of its clean catalog picture, kept in a
     # table and refreshed whenever the card comes up. (MODE=cls: a learned target per card — slow to start.)
-    bank_mode = os.environ.get("MODE", "bank") == "bank"
+    bank_mode = os.environ.get("MODE", "cls") == "bank"
     cls = nn.Parameter(torch.randn(N, DIM) * 0.01)
+    if init and not bank_mode:
+        cls.data = torch.from_numpy(embed_gallery(net, blobs)); log("targets start from the model's own clean fingerprints")
     bank = torch.from_numpy(embed_gallery(net, blobs)) if bank_mode else None
     if bank_mode: log("starting table of clean fingerprints ready")
-    opt = torch.optim.AdamW([{"params": net.body.parameters(), "lr": 4e-4}, {"params": list(net.fc.parameters()) + list(net.bn.parameters()) + [cls], "lr": 2e-3}], weight_decay=1e-4)
+    k_lr = 0.5 if init else 1.0
+    opt = torch.optim.AdamW([{"params": net.body.parameters(), "lr": 4e-4 * k_lr}, {"params": list(net.fc.parameters()) + list(net.bn.parameters()) + [cls], "lr": 2e-3 * k_lr}], weight_decay=1e-4)
     base = [g["lr"] for g in opt.param_groups]
     dl = torch.utils.data.DataLoader(Views(blobs, seed=1), batch_size=BATCH, shuffle=True, num_workers=WORKERS, drop_last=True, persistent_workers=True)
     S, M = 30.0, 0.20
@@ -163,14 +175,17 @@ def main():
     log("training done:", ep, "epochs", step, "steps")
 
     # ------------------------------------------------------------ test
-    G = embed_gallery(net, blobs); log("gallery embedded")
-    report = {"backbone": BACKBONE, "epochs": ep, "steps": step, "pictures": N}
-    vn = min(2000, N); idx = np.random.default_rng(7).choice(N, vn, replace=False)
-    vds = Views([blobs[i] for i in idx], seed=99, fixed=True)
-    q = np.concatenate([embed_views(net, x) for x, _, _ in torch.utils.data.DataLoader(vds, batch_size=128, num_workers=WORKERS)])
-    sims = q @ G.T; rank = (sims > sims[np.arange(vn), idx][:, None]).sum(1)
-    report["sim_top1"] = float((rank == 0).mean()); report["sim_top5"] = float((rank < 5).mean()); report["sim_top20"] = float((rank < 20).mean())
-    log("simulated livestream views: top1 %.3f top5 %.3f top20 %.3f" % (report["sim_top1"], report["sim_top5"], report["sim_top20"]))
+    G = embed_gallery(net, all_blobs); log("gallery embedded")
+    N = len(urls)
+    report = {"backbone": BACKBONE, "epochs": ep, "steps": step, "pictures": N, "held_out": len(hold)}
+    def sim_test(name, pool):
+        vn = min(2000, len(pool)); idx = np.random.default_rng(7).choice(pool, vn, replace=False)
+        vds = Views([all_blobs[i] for i in idx], seed=99, fixed=True)
+        q = np.concatenate([embed_views(net, x) for x, _, _ in torch.utils.data.DataLoader(vds, batch_size=128, num_workers=WORKERS)])
+        sims = q @ G.T; rank = (sims > sims[np.arange(vn), idx][:, None]).sum(1)
+        for k, t in (("top1", 1), ("top5", 5), ("top20", 20)): report[f"{name}_{k}"] = float((rank < t).mean())
+        log(f"simulated livestream views ({name}): top1 %.3f top5 %.3f top20 %.3f" % tuple(report[f"{name}_{k}"] for k in ("top1", "top5", "top20")))
+    sim_test("sim", np.array(train_ix)); sim_test("unseen", np.array(sorted(hold)))
     # real frames
     real = os.path.join(os.path.dirname(os.path.abspath(__file__)), "real")
     truth = json.load(open(os.path.join(real, "truth.json")))
