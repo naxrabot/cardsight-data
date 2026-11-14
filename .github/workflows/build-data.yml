@@ -5,7 +5,7 @@ on:
     - cron: "23 23 * * *"   # daily, after TCGdex refreshes prices (~22:15 UTC)
   workflow_dispatch:
   push:
-    paths: ["build_data.py", ".github/workflows/build-data.yml"]
+    paths: ["build_data.py", "picture_model.txt", ".github/workflows/build-data.yml"]
 
 permissions:
   contents: write
