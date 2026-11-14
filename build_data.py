@@ -102,6 +102,46 @@ def compact_card(lang, c):
     return rec
 
 
+def img_url(u):
+    """Download address for a catalog picture: TCGdex pictures are a base address, TCGplayer's are complete."""
+    if u.endswith((".jpg", ".png", ".webp")):
+        return u.replace("_200w.", "_400w.")
+    return u + "/low.png"
+
+
+# Pokémon TCG Pocket (the phone game) — digital-only cards; they are never sold on a stream and only
+# cause wrong matches.
+POCKET_SET = re.compile(r"^([AB]\d[ab]?|P-[A-Z])$")
+
+
+def fetch_singles():
+    """TCGplayer's list of single cards (English + Japanese) with pictures and prices."""
+    out = {}
+    for cat, lang in SEALED_CATEGORIES:
+        groups = json.loads(http(f"{TCGCSV}/{cat}/groups"))["results"]
+
+        def one(g):
+            gid = g["groupId"]
+            try:
+                prods = json.loads(http(f"{TCGCSV}/{cat}/{gid}/products", tries=4) or b'{"results":[]}')["results"]
+                prices = json.loads(http(f"{TCGCSV}/{cat}/{gid}/prices", tries=4) or b'{"results":[]}')["results"]
+            except Exception:
+                return None
+            ps = []
+            for p in prods:
+                ext = {e.get("name"): e.get("value") for e in (p.get("extendedData") or [])}
+                if "Number" not in ext and "Rarity" not in ext and "HP" not in ext:
+                    continue
+                ps.append({"id": p["productId"], "n": p.get("name"), "img": p.get("imageUrl"), "u": p.get("url"), "no": ext.get("Number")})
+            pr = [{"id": x["productId"], "t": x.get("subTypeName"), "m": num(x.get("marketPrice")), "lo": num(x.get("lowPrice"))} for x in prices]
+            return {"id": gid, "name": g.get("name"), "products": ps, "prices": pr}
+
+        with cf.ThreadPoolExecutor(8) as ex:
+            out[lang] = [g for g in ex.map(one, groups) if g]
+        log(f"TCGplayer singles [{lang}]: {sum(len(g['products']) for g in out[lang])} cards in {len(out[lang])} sets")
+    return out
+
+
 def fetch_lang(lang):
     raw = http(f"{API}/{lang}/cards")
     brief = json.loads(raw)
@@ -284,7 +324,7 @@ def build_fingerprints(cards, model_path):
 
     def fetch(u):
         try:
-            return u, http(u + "/low.png", tries=6, timeout=30)
+            return u, http(img_url(u), tries=6, timeout=30)
         except Exception:
             return u, None  # skip this picture today; text matching still covers the card
 
@@ -373,7 +413,7 @@ def build_net_fingerprints(good, fetch_png=None):
 
         def fetch(u):
             try:
-                b = fetch_png(u) if fetch_png else http(u + "/low.png", tries=6, timeout=30)
+                b = fetch_png(u) if fetch_png else http(img_url(u), tries=6, timeout=30)
                 return u, net_views(b) if b else None
             except Exception:
                 return u, None
@@ -437,6 +477,25 @@ def main():
         cards.extend(lc)
     if counts.get("en", 0) < 15000:
         sys.exit(f"English catalog too small ({counts}); not publishing")
+
+    before = len(cards)
+    cards = [c for c in cards if not POCKET_SET.match(c["s"])]
+    log(f"left out {before - len(cards)} TCG Pocket (digital-only) cards")
+
+    # Pictures and USD prices from TCGplayer for cards the main source has none for.
+    try:
+        import tcg_singles
+        singles = fetch_singles()
+        today = time.strftime("%Y-%m-%d", time.gmtime())
+        for lang in ("en", "ja"):
+            if sum(len(g["products"]) for g in singles.get(lang, [])) < 5000:
+                log(f"TCGplayer singles [{lang}]: too few, skipped")
+                continue
+            pics, prices, stats = tcg_singles.apply(cards, singles[lang], lang, today)
+            log(f"TCGplayer [{lang}]: +{pics} pictures, +{prices} cards priced; "
+                f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found")
+    except Exception as e:
+        log("TCGplayer singles skipped:", e)
 
     # English names for Japanese/Chinese cards (shown in the app, and matched against English listing titles).
     try:

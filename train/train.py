@@ -50,7 +50,7 @@ def load_images(urls):
     def fetch(u):
         for a in range(5):
             try:
-                with urllib.request.urlopen(urllib.request.Request(u + "/low.png", headers=UA), timeout=30) as r:
+                with urllib.request.urlopen(urllib.request.Request(u.replace("_200w.", "_400w.") if u.endswith((".jpg", ".png", ".webp")) else u + "/low.png", headers=UA), timeout=30) as r:
                     im = cv2.imdecode(np.frombuffer(r.read(), np.uint8), cv2.IMREAD_COLOR)
                 im = cv2.resize(im, (245, 337), interpolation=cv2.INTER_AREA)
                 return u, cv2.imencode(".jpg", im, [cv2.IMWRITE_JPEG_QUALITY, 93])[1].tobytes()
