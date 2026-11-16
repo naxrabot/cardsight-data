@@ -1,7 +1,11 @@
 """Check what tcgcsv's daily price archives look like (for price history / trends)."""
 import sys, os, subprocess, json, datetime, urllib.request, time
-sys.path.insert(0, ".")
-from build_data import http
+def http(url, tries=3, timeout=120):
+    for i in range(tries):
+        try:
+            return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "cardsight-data/1.0"}), timeout=timeout).read()
+        except Exception as e:
+            print("retry", e, flush=True); time.sleep(3)
 day = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
 url = f"https://tcgcsv.com/archive/tcgplayer/prices-{day}.ppmd.7z"
 t = time.time(); raw = http(url, tries=3, timeout=120); print("downloaded", len(raw or b""), "bytes in", round(time.time() - t, 1), "s", url, flush=True)
