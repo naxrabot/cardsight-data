@@ -101,6 +101,20 @@ def load_species():
 class Namer:
     def __init__(self):
         self.en, self.local, self.names = load_species()
+        # Official Japanese name by Pokédex number (kana), for cards whose listed name is unusable.
+        self.ja = {sid: name for name, sid in self.local.items() if re.fullmatch(r"[\u30A0-\u30FF\u3040-\u309F♀♂:・ー2Z]+", name)}
+
+    def proper_japanese(self, name, dex):
+        """Some old Japanese sets are listed with machine-translated names ("政治" for Politoed, "beedrill").
+        Returns the official name when the listed one doesn't even contain it, else None."""
+        official = self.ja.get(dex)
+        n = _nfkc(name)
+        if not official or official in n:
+            return None
+        # keep what was right about the listed name: the card type ("ex") and the Delta Species mark
+        kind = SUFFIX_RE.search(PAREN_RE.sub("", n).strip())
+        delta = "デルタ種" in n or "δ" in n
+        return official + (kind.group(1) if kind else "") + ("(デルタ種)" if delta else "")
 
     def english(self, name, dex):
         n = _nfkc(name)

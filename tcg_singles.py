@@ -59,13 +59,95 @@ def match_singles(cards, groups, lang):
     return out, stats
 
 
+def _fits(cn, pn):
+    return bool(cn) and bool(pn) and (cn == pn or cn in pn or pn in cn)
+
+
+def _holo(r):
+    return "holo" in (r or "").lower()
+
+
+def match_local(cards, groups, lang):
+    """Japanese cards -> TCGplayer Japan products. Needs each card's English name ("en"): TCGplayer lists
+    Japanese cards under English names. A set is paired with a TCGplayer set by its code ("SV9a: ..."), or by
+    cards agreeing on number AND name, or — for old sets the two sources number differently — by sharing most
+    of the same names. A card is then paired by number + name, else by a name only one card in each set has.
+    Number alone is trusted only for cards with no English name (trainers) in a set paired by code or number."""
+    mine = [(i, c) for i, c in enumerate(cards) if c.get("l", "en") == lang]
+    sets = collections.defaultdict(list)
+    for i, c in mine: sets[c["s"]].append((i, c))
+    gidx = []
+    for g in groups:
+        by = collections.defaultdict(list); names = collections.Counter()
+        for p in g["products"]:
+            pn = nname(p.get("n")); names[pn] += 1
+            n, t = nnum(p.get("no"))
+            if n: by[n].append((t, pn, p))
+        gidx.append((by, names))
+    out = {}; stats = []
+    for sid, cs in sets.items():
+        cn_of = {i: nname(c.get("en") or "") for i, c in cs}
+        named_cards = [i for i, c in cs if cn_of[i]]
+        best = None
+        for gi, (by, names) in enumerate(gidx):
+            g = groups[gi]
+            numbered = loose = 0
+            left = collections.Counter(names)
+            for i, c in cs:
+                cn = cn_of[i]; n = nnum(c.get("no"))[0]
+                if cn and any(_fits(cn, pn) for t, pn, p in by.get(n, ())): numbered += 1
+                elif not cn and n in by: loose += 1
+                if cn:
+                    k = cn if left.get(cn, 0) > 0 else next((pn for pn in left if left[pn] > 0 and _fits(cn, pn)), None)
+                    if k is not None: left[k] -= 1
+            shared = sum(names.values()) - sum(left.values())
+            code = (g["name"] or "").split(":")[0].strip().lower() == sid.lower()
+            size_ok = 0.5 * len(cs) <= len(g["products"]) <= 2.5 * len(cs)
+            how = None
+            if code and (numbered >= 3 or numbered + loose >= max(4, 0.15 * len(cs))): how = "code"
+            elif numbered >= max(4, 0.3 * len(named_cards)): how = "number"
+            elif size_ok and shared >= max(8, 0.6 * len(named_cards)): how = "name"
+            if how is None: continue
+            rank = (2 if how == "code" else 1 if how == "number" else 0, numbered + 0.5 * shared)
+            if best is None or rank > best[0]: best = (rank, gi, how)
+        if best is None:
+            stats.append((sid, cs[0][1].get("sn"), len(cs), None, 0)); continue
+        _, gi, how = best
+        by, names = gidx[gi]; g = groups[gi]; got = 0; used = set()
+        same = collections.Counter((cn_of[i], _holo(c.get("r"))) for i, c in cs if cn_of[i])
+        later = []
+        for i, c in cs:
+            cn = cn_of[i]; n = nnum(c.get("no"))[0]; cand = by.get(n, ())
+            pick = [p for t, pn, p in cand if _fits(cn, pn)]
+            if not pick and not cn and how != "name" and len(cand) == 1: pick = [cand[0][2]]
+            if pick:
+                out[i] = (g, pick[0]); used.add(pick[0]["id"]); got += 1
+            elif cn: later.append((i, c))
+        for i, c in later:                               # by name alone, when it can only be one product
+            cn = cn_of[i]
+            if same[(cn, _holo(c.get("r")))] != 1: continue
+            ps = [p for p in g["products"] if nname(p.get("n")) == cn] or [p for p in g["products"] if _fits(cn, nname(p.get("n")))]
+            ps = [p for p in ps if p["id"] not in used]
+            if len(ps) > 1:
+                ps = [p for p in ps if _holo(p.get("r")) == _holo(c.get("r"))]
+            if len(ps) == 1:
+                out[i] = (g, ps[0]); used.add(ps[0]["id"]); got += 1
+        stats.append((sid, cs[0][1].get("sn"), len(cs), g["name"] + f" [{how}]", got))
+    return out, stats
+
+
 def apply(cards, groups, lang, today):
     """Add TCGplayer pictures / prices / links to [cards] of one language. Returns (pictures, prices) added."""
-    m, stats = match_singles(cards, groups, lang)
+    m, stats = match_singles(cards, groups, lang) if lang == "en" else match_local(cards, groups, lang)
     pics = prices = 0
     for i, (g, p) in m.items():
         c = cards[i]
         if p.get("u"): c["u"] = p["u"]
+        if lang != "en" and c.get("en"):
+            # TCGplayer's name is fuller than the one worked out from the Pokédex number ("Dark Houndoom", "Shining Charizard").
+            full = re.sub(r"\(.*?\)|\[.*?\]", " ", re.sub(r"\s*-\s*[\w]+/[\w]+\s*$", "", p.get("n") or "")).strip()
+            full = re.sub(r"\s+", " ", full)
+            if full and nname(full) != nname(c["en"]) and nname(c["en"]) in nname(full) and len(full) <= 40: c["en"] = full
         if not c.get("img") and p.get("img"):
             c["img"] = p["img"]; pics += 1
         # Prices straight from TCGplayer's list for today: [recent-sales average, cheapest listing, typical listing].

@@ -483,6 +483,28 @@ def main():
     cards = [c for c in cards if not POCKET_SET.match(c["s"])]
     log(f"left out {before - len(cards)} TCG Pocket (digital-only) cards")
 
+    # English names for Japanese/Chinese cards (shown in the app, matched against English listing titles, and
+    # needed below: TCGplayer lists Japanese cards under their English names).
+    try:
+        from en_names import Namer
+        namer = Namer()
+        named = renamed = 0
+        for c in cards:
+            if c["l"] != "en":
+                e = namer.english(c["n"], c["d"])
+                if e:
+                    c["en"] = e
+                    named += 1
+                if c["l"] == "ja" and c.get("d"):
+                    fixed = namer.proper_japanese(c["n"], c["d"])
+                    if fixed:
+                        c["n"] = fixed
+                        renamed += 1
+        log(f"English names: {named}/{sum(1 for c in cards if c['l'] != 'en')} Japanese/Chinese cards; "
+            f"{renamed} Japanese cards given their official name")
+    except Exception as e:
+        log("English names skipped:", e)
+
     # Pictures and USD prices from TCGplayer for cards the main source has none for.
     try:
         import tcg_singles
@@ -508,21 +530,6 @@ def main():
         log("price history skipped:", e)
     for c in cards:
         c.pop("_src", None)
-
-    # English names for Japanese/Chinese cards (shown in the app, and matched against English listing titles).
-    try:
-        from en_names import Namer
-        namer = Namer()
-        named = 0
-        for c in cards:
-            if c["l"] != "en":
-                e = namer.english(c["n"], c["d"])
-                if e:
-                    c["en"] = e
-                    named += 1
-        log(f"English names: {named}/{sum(1 for c in cards if c['l'] != 'en')} Japanese/Chinese cards")
-    except Exception as e:
-        log("English names skipped:", e)
 
     model_path = os.path.join(OUT, "embedder.tflite")
     if not os.path.exists(model_path):
