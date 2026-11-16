@@ -1,0 +1,15 @@
+name: Price archive probe
+on:
+  workflow_dispatch:
+  push:
+    paths: ["exp/archive_probe.py"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: sudo apt-get install -y -q p7zip-full >/dev/null 2>&1 || true
+      - run: python exp/archive_probe.py
