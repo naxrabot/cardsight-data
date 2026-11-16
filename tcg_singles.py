@@ -70,12 +70,14 @@ def apply(cards, groups, lang, today):
             c["img"] = p["img"]; pics += 1
         # Prices straight from TCGplayer's list for today: [recent-sales average, cheapest listing, typical listing].
         # These replace the main source's copy (same numbers, but that copy can be days old and has no typical listing).
-        tp = {}
+        tp = {}; src = {}
         for x in g["prices"]:
             if x["id"] != p["id"]: continue
             k = SUB.get(x.get("t") or "")
             if k and (x.get("m") is not None or x.get("lo") is not None or x.get("mid") is not None):
                 tp[k] = [x.get("m"), x.get("lo"), x.get("mid")]
+                src[k] = (x["id"], x.get("t"))      # which TCGplayer price row this is, for price history
         if tp:
             c["tp"] = tp; c["pu"] = today; prices += 1
+            c["_src"] = src                         # build-time only; removed before the catalog is written
     return pics, prices, stats

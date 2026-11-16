@@ -497,6 +497,17 @@ def main():
                 f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found")
     except Exception as e:
         log("TCGplayer singles skipped:", e)
+    # Price history: where each price stood 7 and 30 days ago, and how often it has moved (= how often it sells).
+    try:
+        import price_history
+        if any("_src" in c for c in cards):
+            hist = price_history.fetch_history(http, time.strftime("%Y-%m-%d", time.gmtime()), [cat for cat, _ in SEALED_CATEGORIES])
+            n = price_history.apply(cards, hist)
+            log(f"price history: {len(hist)} past days, {n} prices given a trend")
+    except Exception as e:
+        log("price history skipped:", e)
+    for c in cards:
+        c.pop("_src", None)
 
     # English names for Japanese/Chinese cards (shown in the app, and matched against English listing titles).
     try:
