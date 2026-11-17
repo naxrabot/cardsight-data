@@ -14,6 +14,45 @@ def nname(s):
     return re.sub(r"[^a-z0-9]+", "", s)
 SUB = {"Normal": "normal", "Holofoil": "holofoil", "Reverse Holofoil": "reverse-holofoil", "1st Edition": "1st-edition",
        "1st Edition Holofoil": "1st-edition-holofoil", "Unlimited": "unlimited", "Unlimited Holofoil": "unlimited-holofoil"}
+# The same card printed in a special foil pattern or with a stamp. TCGplayer lists each as its own product
+# ("Klink (Master Ball Pattern)") with its own price — often many times the plain card's.
+STYLE_KEYS = [("master ball", "master-ball"), ("poke ball", "poke-ball"), ("energy symbol", "energy-symbol"),
+              ("dusk ball", "dusk-ball"), ("love ball", "love-ball"), ("friend ball", "friend-ball"),
+              ("quick ball", "quick-ball"), ("cosmos", "cosmos-holo"), ("cracked ice", "cracked-ice"),
+              ("staff", "staff"), ("prerelease", "prerelease")]
+
+
+def style_of(name):
+    """'' for a plain listing, else which special style a product name's brackets describe ("stamped" = any other stamp)."""
+    labels = [l.strip().lower() for l in re.findall(r"[\(\[]([^)\]]+)[\)\]]", name or "")]
+    labels = [l for l in labels if not re.fullmatch(r"[\d/ ]+", l)]          # "(15)" is just the card number
+    if not labels:
+        return ""
+    joined = " ".join(labels)
+    for word, key in STYLE_KEYS:
+        if word in joined:
+            return key
+    return "stamped"
+
+
+def split_styles(pick):
+    """From the products sharing a card's number and name: (the plain one, {style: product})."""
+    if len(pick) == 1:
+        return pick[0], {}
+    tagged = [(style_of(p.get("n")), p) for p in pick]
+    plain = [p for st, p in tagged if not st]
+    if not plain:
+        # only special printings exist (promos): the first non-staff one stands for the card
+        base = next((p for st, p in tagged if st != "staff"), tagged[0][1])
+    else:
+        base = plain[0]
+    styles = {}
+    for st, p in tagged:
+        if p is not base and st and st not in styles:
+            styles[st] = p
+    return base, styles
+
+
 def match_singles(cards, groups, lang):
     """groups: tcgcsv groups (with products/prices) for one language. Returns {card index: product}, stats."""
     mine = [(i, c) for i, c in enumerate(cards) if c.get("l", "en") == lang]
@@ -54,7 +93,12 @@ def match_singles(cards, groups, lang):
             pick = [p for t, pn, p in cand if cn and (cn == pn or cn in pn or pn in cn)]
             if not pick and lang != "en" and not cn and len(cand) == 1: pick = [cand[0][2]]
             if len(pick) >= 1:
-                out[i] = (groups[gi], pick[0]); got += 1
+                # Decks reprinted for the World Championships list one card under several players' names — not styles.
+                if "world championship" in (groups[gi]["name"] or "").lower():
+                    base, styles = pick[0], {}
+                else:
+                    base, styles = split_styles(pick)
+                out[i] = (groups[gi], base, styles); got += 1
         stats.append((sid, cs[0][1].get("sn"), len(cs), groups[gi]["name"], got))
     return out, stats
 
@@ -140,7 +184,9 @@ def apply(cards, groups, lang, today):
     """Add TCGplayer pictures / prices / links to [cards] of one language. Returns (pictures, prices) added."""
     m, stats = match_singles(cards, groups, lang) if lang == "en" else match_local(cards, groups, lang)
     pics = prices = 0
-    for i, (g, p) in m.items():
+    for i, hit in m.items():
+        g, p = hit[0], hit[1]
+        styles = hit[2] if len(hit) > 2 else {}
         c = cards[i]
         if p.get("u"): c["u"] = p["u"]
         if lang != "en" and c.get("en"):
@@ -160,6 +206,13 @@ def apply(cards, groups, lang, today):
                 tp[k] = [x.get("m"), x.get("lo"), x.get("mid")]
                 src[k] = (x["id"], x.get("t"))      # which TCGplayer price row this is, for price history
         if tp:
+            # Special foil patterns and stamps of this card, each priced on its own ("s:master-ball").
+            for st, sp in styles.items():
+                rows = [x for x in g["prices"] if x["id"] == sp["id"] and (x.get("m") is not None or x.get("lo") is not None)]
+                if not rows: continue
+                x = max(rows, key=lambda r: (r.get("m") or 0, r.get("lo") or 0))
+                tp["s:" + st] = [x.get("m"), x.get("lo"), x.get("mid")]
+                src["s:" + st] = (x["id"], x.get("t"))
             c["tp"] = tp; c["pu"] = today; prices += 1
             c["_src"] = src                         # build-time only; removed before the catalog is written
     return pics, prices, stats
