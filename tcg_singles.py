@@ -180,9 +180,85 @@ def match_local(cards, groups, lang):
     return out, stats
 
 
-def apply(cards, groups, lang, today):
-    """Add TCGplayer pictures / prices / links to [cards] of one language. Returns (pictures, prices) added."""
+def _price_rows(g, pid):
+    tp = {}; src = {}
+    for x in g["prices"]:
+        if x["id"] != pid: continue
+        k = SUB.get(x.get("t") or "")
+        if k and (x.get("m") is not None or x.get("lo") is not None or x.get("mid") is not None):
+            tp[k] = [x.get("m"), x.get("lo"), x.get("mid")]
+            src[k] = (x["id"], x.get("t"))
+    return tp, src
+
+
+def missing_cards(cards, groups, lang, m, today, namer=None):
+    """Cards TCGplayer lists that the main catalog doesn't have at all (starter sets, deck sets, promos, vending
+    cards...). Returned as new catalog cards with TCGplayer's picture and price, so they can be recognised by
+    their artwork. TCGplayer names them in English; the Japanese name is filled in from the Pokédex when the
+    Pokémon can be told from the name."""
+    used = {hit[1]["id"] for hit in m.values()}
+    # which catalog set each TCGplayer set was paired with, and the numbers / names that set already has
+    paired = collections.defaultdict(lambda: (set(), set()))
+    by_set = collections.defaultdict(list)
+    for c in cards:
+        if c.get("l", "en") == lang: by_set[c["s"]].append(c)
+    done = set()
+    for i, hit in m.items():
+        gid = hit[0]["id"]; sid_ = cards[i]["s"]
+        if (gid, sid_) in done: continue
+        done.add((gid, sid_))
+        nums, names = paired[gid]
+        for c in by_set[sid_]:
+            nums.add(nnum(c.get("no"))[0]); names.add(nname(c.get("en") or c.get("n") or ""))
+    species = []
+    if namer is not None:
+        species = sorted(((nname(n), sid) for sid, n in namer.en.items() if n), key=lambda x: -len(x[0]))
+    have = {c["i"] for c in cards if c.get("l", "en") == lang}
+    out = []
+    for g in groups:
+        nums, names = paired.get(g["id"], (set(), set()))
+        title = g.get("name") or ""
+        code = title.split(":")[0].strip() if ":" in title else ""
+        if not re.fullmatch(r"[A-Za-z0-9.\-]{1,8}", code or ""): code = f"T{g['id']}"
+        setname = title.split(":", 1)[1].strip() if ":" in title else title
+        for p in g["products"]:
+            if p["id"] in used or not p.get("img") or not p.get("n"): continue
+            low = p["n"].lower()
+            if "code card" in low or "jumbo" in low or "oversize" in low: continue
+            n, tot = nnum(p.get("no"))
+            pn = nname(p["n"])
+            if (n and n in nums) or (pn and pn in names): continue        # the catalog has it; it just wasn't paired
+            tp, src = _price_rows(g, p["id"])
+            en = re.sub(r"\s+", " ", re.sub(r"\s*-\s*[\w]+/[\w]+\s*$", "", p["n"])).strip()
+            sid = next((s_ for sn_, s_ in species if len(sn_) >= 3 and sn_ in pn), 0)
+            ja = namer.ja.get(sid) if (namer is not None and sid) else None
+            if ja and re.search(r"\bex\b", en): ja += "ex"
+            number = (p.get("no") or "").split("/")[0].strip()
+            cid = f"{code}-{number}" if number else f"{code}-tp{p['id']}"
+            if cid in have: cid = f"{cid}-tp{p['id']}"
+            have.add(cid)
+            flags = "".join(f for f, k in (("N", "normal"), ("R", "reverse-holofoil"), ("H", "holofoil")) if k in tp)
+            c = {"i": cid, "l": lang, "n": ja or en, "no": number, "s": code, "sn": setname,
+                 "so": int(tot) if str(tot or "").isdigit() else 0, "st": int(tot) if str(tot or "").isdigit() else 0,
+                 "r": "" if p.get("r") in (None, "None") else p["r"], "v": flags, "d": int(sid or 0), "img": p["img"], "en": en}
+            if p.get("u"): c["u"] = p["u"]
+            if tp:
+                c["tp"] = tp; c["pu"] = today; c["_src"] = src
+            out.append(c)
+    return out
+
+
+ADDED = {}
+
+
+def apply(cards, groups, lang, today, namer=None):
+    """Add TCGplayer pictures / prices / links to [cards] of one language. Returns (pictures, prices) added.
+    For Japanese, cards TCGplayer has that the catalog lacks are appended to [cards] (count in ADDED[lang])."""
     m, stats = match_singles(cards, groups, lang) if lang == "en" else match_local(cards, groups, lang)
+    if lang != "en":
+        extra = missing_cards(cards, groups, lang, m, today, namer)
+        ADDED[lang] = len(extra)
+        cards.extend(extra)
     pics = prices = 0
     for i, hit in m.items():
         g, p = hit[0], hit[1]

@@ -132,7 +132,8 @@ def fetch_singles():
                 ext = {e.get("name"): e.get("value") for e in (p.get("extendedData") or [])}
                 if "Number" not in ext and "Rarity" not in ext and "HP" not in ext:
                     continue
-                ps.append({"id": p["productId"], "n": p.get("name"), "img": p.get("imageUrl"), "u": p.get("url"), "no": ext.get("Number")})
+                ps.append({"id": p["productId"], "n": p.get("name"), "img": p.get("imageUrl"), "u": p.get("url"),
+                           "no": ext.get("Number"), "r": ext.get("Rarity")})
             pr = [{"id": x["productId"], "t": x.get("subTypeName"), "m": num(x.get("marketPrice")), "lo": num(x.get("lowPrice")),
                    "mid": num(x.get("midPrice"))} for x in prices]
             return {"id": gid, "name": g.get("name"), "products": ps, "prices": pr}
@@ -485,9 +486,11 @@ def main():
 
     # English names for Japanese/Chinese cards (shown in the app, matched against English listing titles, and
     # needed below: TCGplayer lists Japanese cards under their English names).
+    namer_for_tcg = None
     try:
         from en_names import Namer
         namer = Namer()
+        namer_for_tcg = namer
         named = renamed = 0
         for c in cards:
             if c["l"] != "en":
@@ -514,9 +517,10 @@ def main():
             if sum(len(g["products"]) for g in singles.get(lang, [])) < 5000:
                 log(f"TCGplayer singles [{lang}]: too few, skipped")
                 continue
-            pics, prices, stats = tcg_singles.apply(cards, singles[lang], lang, today)
+            pics, prices, stats = tcg_singles.apply(cards, singles[lang], lang, today, namer_for_tcg)
             log(f"TCGplayer [{lang}]: +{pics} pictures, {prices} cards priced from today's TCGplayer list; "
-                f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found")
+                f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found; "
+                f"{tcg_singles.ADDED.get(lang, 0)} cards added that the catalog lacked")
     except Exception as e:
         log("TCGplayer singles skipped:", e)
     # Price history: where each price stood 7 and 30 days ago, and how often it has moved (= how often it sells).
