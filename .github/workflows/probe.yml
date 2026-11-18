@@ -1,19 +1,10 @@
-name: Model comparison (probe)
-on:
-  workflow_dispatch:
-  push:
-    paths: ["exp/probe.txt"]
-permissions:
-  contents: write
+name: Probe new sets
+on: workflow_dispatch
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -q numpy pillow onnxruntime opencv-python-headless
-      - run: python exp/probe.py m3 f3 f3b
-      - env: { GH_TOKEN: "${{ github.token }}" }
-        run: gh release upload exp out/*_probe.npz --clobber
+        with: { python-version: "3.12" }
+      - run: python tools/probe_new.py
