@@ -508,6 +508,7 @@ def main():
     except Exception as e:
         log("English names skipped:", e)
 
+    set_of_group = {}
     # Pictures and USD prices from TCGplayer for cards the main source has none for.
     try:
         import tcg_singles
@@ -518,18 +519,22 @@ def main():
                 log(f"TCGplayer singles [{lang}]: too few, skipped")
                 continue
             pics, prices, stats = tcg_singles.apply(cards, singles[lang], lang, today, namer_for_tcg)
+            for s_ in stats:                      # which catalog set each TCGplayer set is (for sealed products' chase cards)
+                if s_[3]:
+                    set_of_group[(lang, s_[3].split(" [")[0])] = s_[0]
             log(f"TCGplayer [{lang}]: +{pics} pictures, {prices} cards priced from today's TCGplayer list; "
                 f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found; "
                 f"{tcg_singles.ADDED.get(lang, 0)} cards added that the catalog lacked")
     except Exception as e:
         log("TCGplayer singles skipped:", e)
     # Price history: where each price stood 7 and 30 days ago, and how often it has moved (= how often it sells).
+    past_days = []
     try:
         import price_history
+        past_days = price_history.fetch_history(http, time.strftime("%Y-%m-%d", time.gmtime()), [cat for cat, _ in SEALED_CATEGORIES])
         if any("_src" in c for c in cards):
-            hist = price_history.fetch_history(http, time.strftime("%Y-%m-%d", time.gmtime()), [cat for cat, _ in SEALED_CATEGORIES])
-            n = price_history.apply(cards, hist)
-            log(f"price history: {len(hist)} past days, {n} prices given a trend")
+            n = price_history.apply(cards, past_days)
+            log(f"price history: {len(past_days)} past days, {n} prices given a trend")
     except Exception as e:
         log("price history skipped:", e)
     for c in cards:
@@ -596,6 +601,22 @@ def main():
         sealed = fetch_sealed()
     except Exception as e:
         log("sealed products skipped:", e)
+    # Sealed products: where the price stood a week, a month, a quarter, half a year and a year ago, and
+    # which catalog set the product belongs to (so the app can show that set's chase cards).
+    try:
+        import price_history
+        ph = price_history.product_history(http, time.strftime("%Y-%m-%d", time.gmtime()), [cat for cat, _ in SEALED_CATEGORIES], past_days)
+        n = 0
+        for p in sealed:
+            row = ph.get(int(p["i"])) if str(p["i"]).isdigit() else None
+            if row and any(x is not None for x in row):
+                p["h"] = row; n += 1
+            cs = set_of_group.get((p["l"], p.get("s") or ""))
+            if cs:
+                p["cs"] = cs
+        log(f"sealed: {n} of {len(sealed)} given a price history; {sum(1 for p in sealed if p.get('cs'))} tied to a card set")
+    except Exception as e:
+        log("sealed history skipped:", e)
     for p in sealed:
         h = hist.setdefault("sealed:" + p["i"], {})
         if p.get("m"):

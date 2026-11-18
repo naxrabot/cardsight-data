@@ -49,6 +49,43 @@ def fetch_history(http, today, cats, days=30):
     return [(d, g) for d, g in zip(ago, got) if g]
 
 
+def by_product(day):
+    """{productId: market} from one day's {(productId, subType): market} (the dearest row, as sealed pricing uses)."""
+    out = {}
+    for (pid, _sub), m in day.items():
+        if m is not None and m > out.get(pid, 0):
+            out[pid] = m
+    return out
+
+
+LONG_DAYS = (90, 180, 365)
+
+
+def product_history(http, today, cats, recent):
+    """For sealed products: {productId: [price 7, 30, 90, 180, 365 days ago]} (None where unknown).
+    [recent] is fetch_history()'s result for the last 30 days; the older days are fetched here."""
+    t = datetime.date.fromisoformat(today)
+    days = {d: by_product(g) for d, g in recent}
+
+    def near(target, lo, hi):
+        for d in sorted(range(lo, hi + 1), key=lambda x: abs(x - target)):
+            if d in days:
+                return days[d]
+        return {}
+    cols = [near(7, 5, 10), near(30, 24, 30)]
+    for target in LONG_DAYS:
+        got = None
+        for d in (target, target + 1, target - 1, target + 2):       # a missing archive: try the days beside it
+            got = fetch_day(http, (t - datetime.timedelta(days=d)).isoformat(), cats)
+            if got:
+                break
+        cols.append(by_product(got) if got else {})
+    out = {}
+    for pid in set().union(*[c.keys() for c in cols]):
+        out[pid] = [c.get(pid) for c in cols]
+    return out
+
+
 def summarize(today_price, past):
     """past: {days_ago: price or None}. Returns [price 7 days ago, price 30 days ago, moves, pairs]:
     moves = on how many of the last 14 day-to-day steps the price changed; pairs = how many steps could be compared."""
@@ -98,4 +135,8 @@ if __name__ == "__main__":
     cards = [{"tp": {"holofoil": [10.0, 9.0, 11.0]}, "_src": {"holofoil": (1, "Holofoil")}}, {"tp": {"normal": [1, 1]}}]
     assert apply(cards, [(1, {(1, "Holofoil"): 10.0}), (7, {(1, "Holofoil"): 8.0})]) == 1
     assert cards[0]["tp"]["holofoil"] == [10.0, 9.0, 11.0, 8.0, None, 0, 1], cards[0]
+    assert by_product({(1, "Normal"): 5.0, (1, "Holofoil"): 7.0, (2, None): 1.0}) == {1: 7.0, 2: 1.0}
+    fake = lambda url, tries=3, timeout=120: None
+    ph = product_history(fake, "2026-11-18", [3], [(7, {(1, "Normal"): 90.0}), (29, {(1, "Normal"): 80.0, (2, "Normal"): 5.0})])
+    assert ph == {1: [90.0, 80.0, None, None, None], 2: [None, 5.0, None, None, None]}, ph
     print("ok")
