@@ -12,6 +12,7 @@ Outputs (in ./out):
   embcache.npz     full-size fingerprints, reused next run so only new cards are processed
   manifest.json    version + file hashes (the phone checks this first)
 """
+import collections
 import concurrent.futures as cf
 import gzip
 import hashlib
@@ -206,8 +207,13 @@ def sealed_kind(name):
 def fetch_sealed():
     """Every sealed product TCGplayer lists for Pokemon (English + Japanese), with prices (USD)."""
     out = []
+    today = time.strftime("%Y-%m-%d", time.gmtime())
     for cat, lang in SEALED_CATEGORIES:
         groups = json.loads(http(f"{TCGCSV}/{cat}/groups"))["results"]
+        # Catch-all groups (promos, "Miscellaneous Cards & Products") carry the day they were last touched as
+        # their date, dozens of them the same day. That is not a release date, so it isn't passed on.
+        per_day = collections.Counter((g.get("publishedOn") or "")[:10] for g in groups)
+        junk_days = {d for d, n in per_day.items() if d and n >= 5}
 
         def one(g):
             gid = g["groupId"]
@@ -230,14 +236,22 @@ def fetch_sealed():
                     continue
                 pr = pmap.get(p["productId"], [])
                 best = max(pr, key=lambda x: x.get("marketPrice") or 0, default=None)
-                if not best or not (best.get("marketPrice") or best.get("lowPrice")):
-                    continue                  # no price data at all
+                # TCGplayer's own release day for the product, and whether it is still a pre-order.
+                pre = p.get("presaleInfo") or {}
+                gday = (g.get("publishedOn") or "")[:10]
+                day = (pre.get("releasedOn") or "")[:10] or ("" if gday in junk_days else gday)
+                upcoming = bool(pre.get("isPresale")) or day > today
+                priced = bool(best and (best.get("marketPrice") or best.get("lowPrice")))
+                if not priced and not upcoming:
+                    continue                  # no price data at all (kept when it's coming soon: the date is the news)
+                best = best or {}
                 items.append({
                     "i": str(p["productId"]), "l": lang, "n": name, "s": g.get("name") or "",
                     "k": sealed_kind(name), "img": p.get("imageUrl"), "u": p.get("url"),
                     "m": num(best.get("marketPrice")), "lo": num(best.get("lowPrice")),
                     "mid": num(best.get("midPrice")), "hi": num(best.get("highPrice")),
-                    "d": (g.get("publishedOn") or "")[:10],
+                    "d": day,
+                    **({"pre": 1} if upcoming else {}),
                 })
             return items
 
