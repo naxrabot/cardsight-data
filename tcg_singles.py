@@ -16,23 +16,47 @@ SUB = {"Normal": "normal", "Holofoil": "holofoil", "Reverse Holofoil": "reverse-
        "1st Edition Holofoil": "1st-edition-holofoil", "Unlimited": "unlimited", "Unlimited Holofoil": "unlimited-holofoil"}
 # The same card printed in a special foil pattern or with a stamp. TCGplayer lists each as its own product
 # ("Klink (Master Ball Pattern)") with its own price — often many times the plain card's.
+# Checked in this order: the first word found names the style.
 STYLE_KEYS = [("master ball", "master-ball"), ("poke ball", "poke-ball"), ("energy symbol", "energy-symbol"),
               ("dusk ball", "dusk-ball"), ("love ball", "love-ball"), ("friend ball", "friend-ball"),
-              ("quick ball", "quick-ball"), ("cosmos", "cosmos-holo"), ("cracked ice", "cracked-ice"),
-              ("staff", "staff"), ("prerelease", "prerelease")]
+              ("quick ball", "quick-ball"), ("team rocket pattern", "team-rocket"), ("terastal pattern", "terastal"),
+              ("cosmo", "cosmos-holo"), ("cracked ice", "cracked-ice"),
+              ("web holo", "special-holo"), ("line holo", "special-holo"), ("sheen holo", "special-holo"),
+              ("mirage holo", "special-holo"), ("sparkle holo", "special-holo"), ("tinsel holo", "special-holo"),
+              ("galaxy holo", "special-holo"), ("confetti holo", "special-holo"), ("pixel holo", "special-holo"),
+              ("mirror", "mirror-holo"),                    # Japanese "Mirror Holofoil / Mirror Holo / Mirror Foil"
+              ("staff", "staff"), ("prerelease", "prerelease"),
+              ("1st place", "trophy"), ("2nd place", "trophy"), ("3rd place", "trophy"), ("4th place", "trophy"),
+              ("winner", "trophy"), ("champion]", "trophy"), ("finalist", "trophy"), ("top 8", "trophy"), ("top 16", "trophy"),
+              ("prize pack", "prize-pack"), ("holiday calendar", "holiday-calendar"), ("pokemon center", "pokemon-center"),
+              ("league", "league"), ("regional championship", "league"), ("city championship", "league"),
+              ("state championship", "league"), ("national championship", "league"), ("international championship", "league")]
+# A bracket that only says which ordinary finish this listing is: not a style, it fills that finish's price.
+FINISH_LABELS = {"non-holo": "normal", "non holo": "normal", "reverse holo": "reverse-holofoil",
+                 "reverse holofoil": "reverse-holofoil"}
+# Catch-all TCGplayer sets whose every card is a stamped / special version of a card from a real set.
+GROUP_STYLE = {"prize pack series cards": "prize-pack", "league & championship cards": "league"}
+# Away from the card's own set a bracket is often just the set's name ("(EX Team Magma vs Team Aqua)" on a deck
+# reprint). There it only counts as a stamp when it says so.
+STAMP_WORDS = ("stamp", "exclusive", "promo", "celebration", "pokemon day", "anniversary", "gym", "holo", "toys r us")
 
 
-def style_of(name):
-    """'' for a plain listing, else which special style a product name's brackets describe ("stamped" = any other stamp)."""
+def style_of(name, group="", strict=False):
+    """'' for a plain listing, else which special style a product name's brackets describe ("stamped" = any other
+    stamp). "=normal" / "=reverse-holofoil" when the bracket only names an ordinary finish."""
     labels = [l.strip().lower() for l in re.findall(r"[\(\[]([^)\]]+)[\)\]]", name or "")]
     labels = [l for l in labels if not re.fullmatch(r"[\d/ ]+", l)]          # "(15)" is just the card number
     if not labels:
-        return ""
-    joined = " ".join(labels)
+        return GROUP_STYLE.get((group or "").strip().lower(), "")
+    if len(labels) == 1 and labels[0] in FINISH_LABELS:
+        return "=" + FINISH_LABELS[labels[0]]
+    joined = " ".join(f"[{l}]" for l in labels)
     for word, key in STYLE_KEYS:
         if word in joined:
             return key
-    return "stamped"
+    if strict and not any(w in joined for w in STAMP_WORDS):
+        return GROUP_STYLE.get((group or "").strip().lower(), "")
+    return GROUP_STYLE.get((group or "").strip().lower(), "stamped")
 
 
 def split_styles(pick):
@@ -165,19 +189,119 @@ def match_local(cards, groups, lang):
             pick = [p for t, pn, p in cand if _fits(cn, pn)]
             if not pick and not cn and how != "name" and len(cand) == 1: pick = [cand[0][2]]
             if pick:
-                out[i] = (g, pick[0]); used.add(pick[0]["id"]); got += 1
+                # "Oddish" and "Oddish (Mirror Holofoil)" share a number: the plain one is the card, the rest are styles.
+                base, styles = split_styles(pick)
+                out[i] = (g, base, styles); used.update(p["id"] for p in pick); got += 1
             elif cn: later.append((i, c))
         for i, c in later:                               # by name alone, when it can only be one product
             cn = cn_of[i]
             if same[(cn, _holo(c.get("r")))] != 1: continue
             ps = [p for p in g["products"] if nname(p.get("n")) == cn] or [p for p in g["products"] if _fits(cn, nname(p.get("n")))]
             ps = [p for p in ps if p["id"] not in used]
+            if len(ps) > 1 and len({nnum(p.get("no"))[0] for p in ps}) == 1:
+                base, styles = split_styles(ps)           # one card listed plain and in special styles
+                out[i] = (g, base, styles); used.update(p["id"] for p in ps); got += 1
+                continue
             if len(ps) > 1:
                 ps = [p for p in ps if _holo(p.get("r")) == _holo(c.get("r"))]
             if len(ps) == 1:
                 out[i] = (g, ps[0]); used.add(ps[0]["id"]); got += 1
         stats.append((sid, cs[0][1].get("sn"), len(cs), g["name"] + f" [{how}]", got))
     return out, stats
+
+
+def classic_reprints(cards, groups, lang="en"):
+    """Classic Collection reprints (Celebrations 25th, 30th Celebration): old cards reprinted with an anniversary
+    stamp, still carrying the ORIGINAL card's number ("Dark Gyarados 8/82") — but the main catalog numbers them
+    CC001, CC002... so a scan of the number could only ever find the original, at the original's price.
+    Gives each reprint the number printed on it (from TCGplayer's listing) and notes which card it reprints
+    ("rp"), so the app can offer both. Returns how many were fixed."""
+    sets = collections.defaultdict(list)
+    for i, c in enumerate(cards):
+        if c.get("l", "en") == lang and "classic collection" in (c.get("sn") or "").lower(): sets[c["s"]].append(i)
+    if not sets: return 0
+    originals = collections.defaultdict(list)
+    for i, c in enumerate(cards):
+        if c.get("l", "en") == lang and c["s"] not in sets: originals[nnum(c.get("no"))[0]].append(i)
+    fixed = 0
+    for g in groups:
+        if "classic collection" not in (g.get("name") or "").lower(): continue
+        names = collections.Counter(nname(p.get("n")) for p in g["products"])
+        best = max(sets, key=lambda sid: sum(1 for i in sets[sid] if names.get(nname(cards[i].get("n")))), default=None)
+        if best is None or sum(1 for i in sets[best] if names.get(nname(cards[i].get("n")))) < 0.5 * len(sets[best]): continue
+        left = list(g["products"]); todo = list(sets[best])
+        for exact in (True, False):
+            for i in list(todo):
+                cn = nname(cards[i].get("n"))
+                p = next((p for p in left if (nname(p.get("n")) == cn if exact else (len(cn) >= 4 and _fits(cn, nname(p.get("n")))))), None)
+                if p is None: continue
+                left.remove(p); todo.remove(i)
+                n, tot = nnum(p.get("no"))
+                if not n: continue
+                c = cards[i]
+                c["no"] = n
+                if tot.isdigit(): c["so"] = c["st"] = int(tot)
+                # the card this is a reprint of: same number, same set size, same name, in an ordinary set
+                orig = [j for j in originals.get(n, ()) if tot and str(cards[j].get("so") or "") == tot
+                        and _fits(nname(cards[j].get("n")), nname(p.get("n")))]
+                if len(orig) == 1: c["rp"] = cards[orig[0]]["i"]
+                fixed += 1
+    return fixed
+
+
+SKIP_GROUP = ("world championship", "jumbo")
+
+
+def cross_styles(cards, groups, lang, m):
+    """Special versions that TCGplayer files away from the card's own set — Prize Pack stamps, League stamps,
+    cosmos / cracked-ice holos from blisters and decks, holiday-calendar stamps. Each is paired with the catalog
+    card of the same number, set size and name ("Volcanion - 25/114 (Pokemon League)" -> Steam Siege 25/114), or
+    for promo-numbered ones by a number + name only one card has. Returns {card index: {style: (group, product)}}."""
+    used = set()
+    for hit in m.values():
+        used.add(hit[1]["id"])
+        for sp in (hit[2] if len(hit) > 2 else {}).values(): used.add(sp["id"])
+    full = collections.defaultdict(list); loose = collections.defaultdict(list)
+    for i, c in enumerate(cards):
+        if c.get("l", "en") != lang: continue
+        n = nnum(c.get("no"))[0]
+        if not n: continue
+        for tot in {str(c.get("so") or ""), str(c.get("st") or "")} - {"", "0"}:
+            full[(n, tot)].append(i)
+        loose[n].append(i)
+    def name_of(c): return nname(c.get("n") if lang == "en" else (c.get("en") or ""))
+    out = collections.defaultdict(dict)
+    for g in groups:
+        gname = g.get("name") or ""
+        if any(w in gname.lower() for w in SKIP_GROUP): continue
+        for p in g["products"]:
+            if p["id"] in used or not p.get("n"): continue
+            low = p["n"].lower()
+            if "code card" in low or "jumbo" in low or "oversize" in low: continue
+            st = style_of(p["n"], gname, strict=True)
+            if not st: continue
+            n, tot = nnum(p.get("no")); pn = nname(p["n"])
+            if not n or not pn: continue
+            if tot:
+                cand = [i for i in full.get((n, tot), ()) if _fits(name_of(cards[i]), pn)]
+            else:
+                cand = [i for i in loose.get(n, ()) if name_of(cards[i]) == pn]
+            if len(cand) != 1: continue                     # no such card, or can't tell which
+            out[cand[0]].setdefault(st, (g, p))
+    return out
+
+
+def _add_styles(tp, src, styles):
+    """styles: {style: (group, product)}. Adds each one's price to [tp] ("s:cosmos-holo"); a "=finish" entry
+    fills that ordinary finish when the card's own listing has no price for it."""
+    for st, (g, sp) in styles.items():
+        rows = [x for x in g["prices"] if x["id"] == sp["id"] and (x.get("m") is not None or x.get("lo") is not None)]
+        if not rows: continue
+        x = max(rows, key=lambda r: (r.get("m") or 0, r.get("lo") or 0))
+        key = st[1:] if st.startswith("=") else "s:" + st
+        if key in tp: continue
+        tp[key] = [x.get("m"), x.get("lo"), x.get("mid")]
+        src[key] = (x["id"], x.get("t"))
 
 
 def _price_rows(g, pid):
@@ -249,11 +373,14 @@ def missing_cards(cards, groups, lang, m, today, namer=None):
 
 
 ADDED = {}
+STYLED = {}
+REPRINTS = {}
 
 
 def apply(cards, groups, lang, today, namer=None):
     """Add TCGplayer pictures / prices / links to [cards] of one language. Returns (pictures, prices) added.
     For Japanese, cards TCGplayer has that the catalog lacks are appended to [cards] (count in ADDED[lang])."""
+    if lang == "en": REPRINTS[lang] = classic_reprints(cards, groups, lang)
     m, stats = match_singles(cards, groups, lang) if lang == "en" else match_local(cards, groups, lang)
     if lang != "en":
         extra = missing_cards(cards, groups, lang, m, today, namer)
@@ -281,14 +408,18 @@ def apply(cards, groups, lang, today, namer=None):
             if k and (x.get("m") is not None or x.get("lo") is not None or x.get("mid") is not None):
                 tp[k] = [x.get("m"), x.get("lo"), x.get("mid")]
                 src[k] = (x["id"], x.get("t"))      # which TCGplayer price row this is, for price history
+        # Special foil patterns and stamps of this card, each priced on its own ("s:master-ball").
+        _add_styles(tp, src, {st: (g, sp) for st, sp in styles.items()})
         if tp:
-            # Special foil patterns and stamps of this card, each priced on its own ("s:master-ball").
-            for st, sp in styles.items():
-                rows = [x for x in g["prices"] if x["id"] == sp["id"] and (x.get("m") is not None or x.get("lo") is not None)]
-                if not rows: continue
-                x = max(rows, key=lambda r: (r.get("m") or 0, r.get("lo") or 0))
-                tp["s:" + st] = [x.get("m"), x.get("lo"), x.get("mid")]
-                src["s:" + st] = (x["id"], x.get("t"))
             c["tp"] = tp; c["pu"] = today; prices += 1
             c["_src"] = src                         # build-time only; removed before the catalog is written
+    # ...and the special versions filed under catch-all sets (Prize Pack, League, blister and deck exclusives).
+    STYLED[lang] = 0
+    for i, styles in cross_styles(cards, groups, lang, m).items():
+        c = cards[i]
+        tp = c.get("tp") or {}; src = c.get("_src") or {}
+        before = len(tp)
+        _add_styles(tp, src, styles)
+        if len(tp) > before:
+            c["tp"] = tp; c["_src"] = src; c.setdefault("pu", today); STYLED[lang] += 1
     return pics, prices, stats

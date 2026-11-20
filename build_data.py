@@ -538,7 +538,9 @@ def main():
                     set_of_group[(lang, s_[3].split(" [")[0])] = s_[0]
             log(f"TCGplayer [{lang}]: +{pics} pictures, {prices} cards priced from today's TCGplayer list; "
                 f"{sum(1 for s_ in stats if s_[3] is None)} of {len(stats)} sets not found; "
-                f"{tcg_singles.ADDED.get(lang, 0)} cards added that the catalog lacked")
+                f"{tcg_singles.ADDED.get(lang, 0)} cards added that the catalog lacked, "
+                f"{tcg_singles.STYLED.get(lang, 0)} cards given stamped/special versions from catch-all sets, "
+                f"{tcg_singles.REPRINTS.get(lang, 0)} Classic Collection reprints renumbered")
     except Exception as e:
         log("TCGplayer singles skipped:", e)
     # Price history: where each price stood 7 and 30 days ago, and how often it has moved (= how often it sells).
