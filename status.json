@@ -1,6 +1,6 @@
 {
- "version": 1795324100,
- "generated": "2026-11-22T05:08:23Z",
+ "version": 1795412009,
+ "generated": "2026-11-23T05:33:32Z",
  "counts": {
   "en": 23912,
   "ja": 13156,
@@ -10,8 +10,8 @@
  "fingerprints": 49499,
  "files": {
   "catalog.json.gz": {
-   "sha256": "5bcc1adab52b46ef27a88e8f2523b332a752e6ff9e3c32dba1a5a4408de7471a",
-   "size": 4673441
+   "sha256": "0af4e56c02692568a04828df3cdfce9956a880506e69f98beb030aeb818edbf1",
+   "size": 4682513
   },
   "emb.bin": {
    "sha256": "ca05346e3eb684bf7c643649e0641e34ebdbc4e42657e6b5921671276e5d0504",
@@ -22,8 +22,8 @@
    "size": 10889458
   },
   "sealed.json.gz": {
-   "sha256": "e8f2057472ca05e22eebf067ad0e9c9e36fd5c2e2849d413a847dbe989c2643c",
-   "size": 166829
+   "sha256": "513ae417991697ec3b3454d43c9fdc8cb03607429ff00324c54ad4b76bcc2bf5",
+   "size": 166023
   },
   "emb3.bin": {
    "sha256": "654edcd20a42a294017a9642079b0eb9287133da621b53489f9aee74bc6a06b1",
@@ -35,5 +35,5 @@
   }
  },
  "eur_usd": 1.099,
- "sealed": 2525
+ "sealed": 2510
 }
