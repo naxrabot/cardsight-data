@@ -1,6 +1,6 @@
 {
- "version": 1795509745,
- "generated": "2026-11-24T08:42:28Z",
+ "version": 1795590917,
+ "generated": "2026-11-25T07:15:21Z",
  "counts": {
   "en": 23912,
   "ja": 13156,
@@ -10,11 +10,11 @@
  "fingerprints": 49499,
  "files": {
   "catalog.json.gz": {
-   "sha256": "dfc437de8eee65ac945e38d923808bde1d781808e104198abc7df08737740fc6",
-   "size": 4684359
+   "sha256": "c24bf0c05b7355085c130784422c52eaa64afa8dcf365cb348bcee11756cae25",
+   "size": 4694337
   },
   "emb.bin": {
-   "sha256": "ca05346e3eb684bf7c643649e0641e34ebdbc4e42657e6b5921671276e5d0504",
+   "sha256": "db6622ef05dfbc94615524188f2217d541c6f8d6a9b4a3f8d52641d239376e85",
    "size": 27975192
   },
   "embedder.tflite": {
@@ -22,8 +22,8 @@
    "size": 10889458
   },
   "sealed.json.gz": {
-   "sha256": "471d43ed55b37536f88abbd7bf743772bc6cf348eabfa2abe2c4de42b2cefbfe",
-   "size": 166505
+   "sha256": "08fabd8b559c96c5b466cc2e08b0bc2cbc8e23c575149a7c03793f597b443231",
+   "size": 166825
   },
   "emb3.bin": {
    "sha256": "654edcd20a42a294017a9642079b0eb9287133da621b53489f9aee74bc6a06b1",
@@ -34,6 +34,6 @@
    "size": 18114531
   }
  },
- "eur_usd": 1.0939,
- "sealed": 2514
+ "eur_usd": 1.0963,
+ "sealed": 2518
 }
