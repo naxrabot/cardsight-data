@@ -1,39 +1,39 @@
 {
- "version": 1795590917,
- "generated": "2026-11-25T07:15:21Z",
+ "version": 1795676479,
+ "generated": "2026-11-26T07:01:22Z",
  "counts": {
   "en": 23912,
   "ja": 13156,
   "zh-tw": 7436,
   "zh-cn": 877
  },
- "fingerprints": 49499,
+ "fingerprints": 49516,
  "files": {
   "catalog.json.gz": {
-   "sha256": "c24bf0c05b7355085c130784422c52eaa64afa8dcf365cb348bcee11756cae25",
-   "size": 4694337
+   "sha256": "bd01628ab0685953769d61dc89038193bb192713eb46c4b5a5123cdf34472753",
+   "size": 4693402
   },
   "emb.bin": {
-   "sha256": "db6622ef05dfbc94615524188f2217d541c6f8d6a9b4a3f8d52641d239376e85",
-   "size": 27975192
+   "sha256": "b523027ccad3bc1a13f3cf6b62919d664295fe22c5be495d8aea0c40d70e99fe",
+   "size": 27983896
   },
   "embedder.tflite": {
    "sha256": "11af3c560dfeed7737cb4c03c23bf52a8403020784192d4dea0b74862a12828d",
    "size": 10889458
   },
   "sealed.json.gz": {
-   "sha256": "08fabd8b559c96c5b466cc2e08b0bc2cbc8e23c575149a7c03793f597b443231",
-   "size": 166825
+   "sha256": "e705d8ef93b777b2c2c23c1c062c5cb20b984401e645599bd6718c9d60a0c02c",
+   "size": 167634
   },
   "emb3.bin": {
-   "sha256": "654edcd20a42a294017a9642079b0eb9287133da621b53489f9aee74bc6a06b1",
-   "size": 12671760
+   "sha256": "552b851fd3e890ced7bdccb42d0c691b2a533588b98009a6791ba5a70267e4eb",
+   "size": 12676112
   },
   "cardnet.onnx": {
    "sha256": "08a796c26a781645be6c54f8215dcaf02b0810f569c1604f627c1ba5427bc926",
    "size": 18114531
   }
  },
- "eur_usd": 1.0963,
- "sealed": 2518
+ "eur_usd": 1.0935,
+ "sealed": 2530
 }
